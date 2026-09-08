@@ -63,15 +63,3 @@ types/                # domain types mirroring the future Postgres schema
    access later. Service-role keys must never enter the frontend.
 4. Matching/business logic lives in `lib/matching/*`, not in components.
 
-## Build stages
-
-- [x] Stage 1 — setup, theme, layout shell, design system, mock/service skeleton
-- [ ] Stage 2 — landing page + auth UI
-- [ ] Stage 3 — student profile setup
-- [ ] Stage 4 — dashboard
-- [ ] Stage 5 — projects + creation
-- [ ] Stage 6 — matching / recommendations
-- [ ] Stage 7 — teams
-- [ ] Stage 8 — requests + notifications
-- [ ] Stage 9 — admin dashboard
-- [ ] Stage 10 — responsive / mobile polish
