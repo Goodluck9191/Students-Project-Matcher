@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:matching": "node --loader ./scripts/ts-resolve-loader.mjs scripts/matching-tests.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
