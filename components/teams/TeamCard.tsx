@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { ArrowRight, CalendarDays, Crown, UsersRound } from "lucide-react";
+import { ArrowRight, CalendarDays, Crown, MessageCircle, UsersRound } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent } from "@/components/ui/Card";
 import { Progress } from "@/components/ui/Progress";
 import { TeamStatus } from "./TeamStatus";
+import { getUnreadMessageCount } from "@/lib/services/chat";
 import { openPositions } from "@/lib/services/teams";
 import { formatDate } from "@/lib/utils";
 import type { Team } from "@/types";
@@ -19,6 +20,7 @@ export function TeamCard({
   ownerName: string;
 }) {
   const open = openPositions(team);
+  const unread = getUnreadMessageCount(team.id, "me");
   return (
     <Card className="flex h-full flex-col">
       <CardContent className="flex flex-1 flex-col py-5">
@@ -73,9 +75,19 @@ export function TeamCard({
         </p>
 
         <div className="mt-3 flex-1" />
-        <Button href={`/teams/${team.id}`} variant="outline" size="sm" className="w-full">
-          View Team <ArrowRight className="h-3.5 w-3.5" />
-        </Button>
+        <div className="flex gap-2">
+          <Button href={`/teams/${team.id}`} variant="outline" size="sm" className="flex-1">
+            View Team <ArrowRight className="h-3.5 w-3.5" />
+          </Button>
+          <Button href={`/teams/${team.id}/chat`} variant="outline" size="sm" className="flex-1" aria-label={unread > 0 ? `Open team chat, ${unread} unread` : "Open team chat"}>
+            <MessageCircle className="h-3.5 w-3.5" /> Chat
+            {unread > 0 && (
+              <span className="rounded-full bg-brand-600 px-1.5 py-0.5 text-[11px] font-bold text-white">
+                {unread > 9 ? "9+" : unread}
+              </span>
+            )}
+          </Button>
+        </div>
       </CardContent>
     </Card>
   );
