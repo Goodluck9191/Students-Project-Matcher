@@ -67,7 +67,7 @@ export type ProjectCategory =
 
 export type ProjectType = "Coursework" | "Final Year" | "Hackathon" | "Research" | "Side Project";
 
-export type ProjectStatus = "Recruiting" | "Team Complete" | "In Progress" | "Completed";
+export type ProjectStatus = "Recruiting" | "Team Complete" | "In Progress" | "Completed" | "Archived";
 
 export interface Project {
   id: string;
@@ -94,6 +94,7 @@ export const PROJECT_STATUS_OPTIONS: ProjectStatus[] = [
   "Team Complete",
   "In Progress",
   "Completed",
+  "Archived",
 ];
 
 export const PROJECT_CATEGORY_OPTIONS: ProjectCategory[] = [

@@ -121,6 +121,14 @@ export async function getTeamActivity(teamId: string): Promise<TeamActivityItem[
   return clone(store().activity.filter((a) => a.teamId === teamId));
 }
 
+/** Admin view: every team activity event, newest first. */
+export async function listAllTeamActivity(): Promise<TeamActivityItem[]> {
+  await delay(200);
+  return clone([...store().activity].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  ));
+}
+
 /* ------------------------------ permissions ------------------------------ */
 
 export function isTeamOwner(team: Team, userId: string): boolean {
@@ -156,6 +164,8 @@ export function teamStatusLabel(team: Team): string {
       return "Project work is underway";
     case "Completed":
       return "Project completed";
+    case "Archived":
+      return "Archived";
   }
 }
 
@@ -257,6 +267,7 @@ const STATUS_FLOW: Record<ProjectStatus, ProjectStatus[]> = {
   "Team Complete": ["Team Complete", "In Progress", "Recruiting"],
   "In Progress": ["In Progress", "Completed", "Recruiting"],
   Completed: ["Completed", "In Progress"],
+  Archived: ["Archived"],
 };
 
 export function allowedStatuses(current: ProjectStatus): ProjectStatus[] {
@@ -266,15 +277,40 @@ export function allowedStatuses(current: ProjectStatus): ProjectStatus[] {
 export async function updateTeamStatus(
   teamId: string,
   status: ProjectStatus,
-  actorId: string
+  actorId: string,
+  opts?: { asAdmin?: boolean }
 ): Promise<{ ok: true; team: Team } | { ok: false; error: TeamMutationError }> {
   await delay(400);
   const team = store().teams.find((t) => t.id === teamId);
   if (!team) return { ok: false, error: "TEAM_NOT_FOUND" };
-  if (!canManageMembers(team, actorId)) return { ok: false, error: "NOT_OWNER" };
+  if (!opts?.asAdmin && !canManageMembers(team, actorId))
+    return { ok: false, error: "NOT_OWNER" };
   team.status = status;
   touch(team, `Project status changed to ${status}`);
   return { ok: true, team: clone(team) };
+}
+
+/**
+ * Admin-only: remove a team entirely (members keep their profiles;
+ * dangling request links degrade gracefully to the requests inbox).
+ */
+export async function disbandTeam(
+  teamId: string
+): Promise<{ ok: true } | { ok: false; error: TeamMutationError }> {
+  await delay(400);
+  const idx = store().teams.findIndex((t) => t.id === teamId);
+  if (idx < 0) return { ok: false, error: "TEAM_NOT_FOUND" };
+  const [removed] = store().teams.splice(idx, 1);
+  if (sessionActivity) {
+    sessionActivity.unshift({
+      id: `ta-${Date.now().toString(36)}`,
+      teamId,
+      title: `${removed.projectTitle} was disbanded by an administrator`,
+      createdAt: new Date().toISOString(),
+    });
+  }
+  persist();
+  return { ok: true };
 }
 
 /* ------------------------------- coverage -------------------------------- */

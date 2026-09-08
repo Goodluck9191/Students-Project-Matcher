@@ -12,7 +12,8 @@ export const PROJECT_STATUS_BADGE: Record<ProjectStatus, "warning" | "success" |
   Recruiting: "warning",
   "Team Complete": "success",
   "In Progress": "info",
-  "Completed": "default",
+  Completed: "default",
+  Archived: "default",
 };
 
 /**

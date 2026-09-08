@@ -77,7 +77,6 @@ export function Navbar({ onMenuClick }: { onMenuClick: () => void }) {
               { href: "/profile/me", label: "View profile" },
               { href: "/profile/setup", label: "Edit profile" },
               { href: "/settings", label: "Settings" },
-              { href: "/admin", label: "Admin dashboard" },
             ].map((l) => (
               <Link
                 key={l.href + l.label}

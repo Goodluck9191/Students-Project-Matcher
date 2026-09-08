@@ -10,7 +10,8 @@
     "test:matching": "node --loader ./scripts/ts-resolve-loader.mjs scripts/matching-tests.ts",
     "test:teams": "node --loader ./scripts/ts-resolve-loader.mjs scripts/teams-tests.ts",
     "test:requests": "node --loader ./scripts/ts-resolve-loader.mjs scripts/requests-tests.ts",
-    "test:chat": "node --loader ./scripts/ts-resolve-loader.mjs scripts/chat-tests.ts"
+    "test:chat": "node --loader ./scripts/ts-resolve-loader.mjs scripts/chat-tests.ts",
+    "test:admin": "node --loader ./scripts/ts-resolve-loader.mjs scripts/admin-tests.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

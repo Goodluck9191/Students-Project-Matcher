@@ -114,6 +114,46 @@ function writeStored(project: Project): void {
 /** Session-created projects (module memory; hydrated from localStorage in browser). */
 const sessionProjects: Project[] = [];
 
+const ADMIN_OVERLAY_KEY = "pm.projects.admin.v1";
+
+interface AdminOverlay {
+  updates: Record<string, Partial<Project>>;
+  deleted: string[];
+}
+
+/** Module memory is canonical (works in Node/tests); localStorage mirrors it in browsers. */
+let memoryOverlay: AdminOverlay | null = null;
+
+function readAdminOverlay(): AdminOverlay {
+  if (memoryOverlay) return memoryOverlay;
+  if (isBrowser()) {
+    try {
+      const raw = window.localStorage.getItem(ADMIN_OVERLAY_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as AdminOverlay;
+        if (parsed && typeof parsed === "object") {
+          memoryOverlay = { updates: parsed.updates ?? {}, deleted: parsed.deleted ?? [] };
+          return memoryOverlay;
+        }
+      }
+    } catch {
+      // fall through
+    }
+  }
+  memoryOverlay = { updates: {}, deleted: [] };
+  return memoryOverlay;
+}
+
+function writeAdminOverlay(overlay: AdminOverlay): void {
+  memoryOverlay = overlay;
+  if (!isBrowser()) return;
+  try {
+    window.localStorage.setItem(ADMIN_OVERLAY_KEY, JSON.stringify(overlay));
+  } catch {
+    // ignore
+  }
+}
+
 function allProjects(): Project[] {
   if (isBrowser()) {
     for (const id of readStoredIds()) {
@@ -123,7 +163,11 @@ function allProjects(): Project[] {
       }
     }
   }
-  return [...sessionProjects, ...mockProjects];
+  const overlay = readAdminOverlay();
+  const deleted = new Set(overlay.deleted);
+  return [...sessionProjects, ...mockProjects]
+    .filter((p) => !deleted.has(p.id))
+    .map((p) => (overlay.updates[p.id] ? { ...p, ...overlay.updates[p.id] } : p));
 }
 
 export function getProject(id: string): Project | undefined {
@@ -167,6 +211,8 @@ function matchesTeamSize(max: number, bucket: string): boolean {
 export function filterProjects(projects: Project[], f: ProjectFilters): Project[] {
   const q = f.query.trim().toLowerCase();
   const result = projects.filter((p) => {
+    // Archived projects never surface in student discovery.
+    if (!f.status && p.status === "Archived") return false;
     if (
       q &&
       !`${p.title} ${p.description} ${p.requiredSkills.join(" ")} ${p.category}`.toLowerCase().includes(q)
@@ -197,6 +243,14 @@ export function filterProjects(projects: Project[], f: ProjectFilters): Project[
 export async function listProjects(filters: ProjectFilters): Promise<Project[]> {
   await new Promise((r) => setTimeout(r, 450));
   return filterProjects(allProjects(), filters);
+}
+
+/** Admin view: every project including archived/deleted-excluded session state. */
+export async function listAllProjects(): Promise<Project[]> {
+  await new Promise((r) => setTimeout(r, 300));
+  return [...allProjects()].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
 }
 
 export async function getProjectById(id: string): Promise<Project | null> {
@@ -295,7 +349,49 @@ export async function updateProject(
     sessionProjects.unshift(updated);
   }
   writeStored(updated);
+  // Owner edits resurrect admin-archived/deleted projects.
+  const overlay = readAdminOverlay();
+  if (overlay.deleted.includes(id) || overlay.updates[id]) {
+    overlay.deleted = overlay.deleted.filter((d) => d !== id);
+    delete overlay.updates[id];
+    writeAdminOverlay(overlay);
+  }
   return updated;
+}
+
+/* ------------------------- admin operations ------------------------- */
+/**
+ * Admin-only mutations (role-checked by callers in adminService).
+ * Applied as overlays/tombstones over the SAME store students read,
+ * so admin actions stay consistent across the whole app.
+ */
+
+export async function setProjectStatus(
+  id: string,
+  status: ProjectStatus
+): Promise<Project | null> {
+  await new Promise((r) => setTimeout(r, 400));
+  const existing = getProject(id);
+  if (!existing) return null;
+  const overlay = readAdminOverlay();
+  overlay.updates[id] = { ...(overlay.updates[id] ?? {}), status };
+  overlay.deleted = overlay.deleted.filter((d) => d !== id);
+  writeAdminOverlay(overlay);
+  const idx = sessionProjects.findIndex((p) => p.id === id);
+  if (idx >= 0) sessionProjects[idx] = { ...sessionProjects[idx], status };
+  return getProject(id) ?? null;
+}
+
+export async function deleteProject(id: string): Promise<boolean> {
+  await new Promise((r) => setTimeout(r, 400));
+  if (!getProject(id)) return false;
+  const overlay = readAdminOverlay();
+  if (!overlay.deleted.includes(id)) overlay.deleted.push(id);
+  delete overlay.updates[id];
+  writeAdminOverlay(overlay);
+  const idx = sessionProjects.findIndex((p) => p.id === id);
+  if (idx >= 0) sessionProjects.splice(idx, 1);
+  return true;
 }
 
 /** Prefill the shared form from an existing project (edit flow). */

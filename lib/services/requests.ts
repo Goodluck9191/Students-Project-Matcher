@@ -115,6 +115,12 @@ export async function getRequestById(id: string): Promise<TeamRequest | null> {
   return clone(store().find((r) => r.id === id) ?? null);
 }
 
+/** Admin view: every request in the session store, newest first. */
+export async function listAllRequests(): Promise<TeamRequest[]> {
+  await delay(200);
+  return clone([...store()].sort(byNewest));
+}
+
 /** Pending request between a team and a student (either direction). */
 export function findPendingRequest(teamId: string, studentId: string): TeamRequest | undefined {
   return store().find(

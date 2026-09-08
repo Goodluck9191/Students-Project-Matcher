@@ -14,6 +14,7 @@ const STATUS_VARIANT: Record<MyProject["status"], "primary" | "success" | "info"
   "Team Complete": "success",
   "In Progress": "info",
   "Completed": "default",
+  "Archived": "default",
 };
 
 export function MyProjects({ projects }: { projects: MyProject[] }) {

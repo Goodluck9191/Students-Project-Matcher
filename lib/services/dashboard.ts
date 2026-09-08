@@ -9,10 +9,10 @@ import type {
   TeamRequest,
 } from "@/types";
 import { mockCurrentStudent, mockStudents } from "@/lib/mock/students";
-import { mockProjects } from "@/lib/mock/projects";
-import { mockTeams } from "@/lib/mock/teams";
 import { mockProfile } from "@/lib/mock/profile";
 import { getMatchTier } from "@/lib/matching/score";
+import { EMPTY_FILTERS, listProjects } from "./projects";
+import { listTeams } from "./teams";
 import { getReceivedRequests, getSentRequests } from "./requests";
 import { getNotifications, getUnreadCount } from "./notifications";
 
@@ -87,19 +87,25 @@ function toTeammate(student: Student, projectNeeds: string[]): MatchRecommendati
 export async function getDashboardData(): Promise<DashboardData> {
   await delay();
 
-  const myProjects: MyProject[] = mockTeams.map((t) => {
-    const me = t.members.find((m) => m.studentId === "me");
-    const full = t.members.length >= t.maxMembers;
-    return {
-      ...t,
-      role: me?.role ?? "Member",
-      status: full ? (t.progress >= 70 ? "In Progress" : "Team Complete") : "Recruiting",
-    };
-  });
+  const [allProjects, allTeams] = await Promise.all([
+    listProjects(EMPTY_FILTERS),
+    listTeams(),
+  ]);
 
-  const recommendedProjects = [...mockProjects]
+  const myProjects: MyProject[] = allTeams
+    .filter((t) => t.members.some((m) => m.studentId === "me"))
+    .map((t) => {
+      const me = t.members.find((m) => m.studentId === "me");
+      const full = t.members.length >= t.maxMembers;
+      return {
+        ...t,
+        role: me?.role ?? "Member",
+        status: full ? (t.progress >= 70 ? "In Progress" : "Team Complete") : "Recruiting",
+      };
+    });
+
+  const recommendedProjects = allProjects
     .filter((p) => p.creatorId !== "me")
-    .sort((a, b) => (b.matchPercentage ?? 0) - (a.matchPercentage ?? 0))
     .slice(0, 3);
 
   const projectNeeds = ["React", "Node.js", "PostgreSQL", "UI/UX"];
@@ -135,7 +141,9 @@ export async function getDashboardData(): Promise<DashboardData> {
     {
       id: "act-3",
       title: "You created “University Asset Management System”",
-      createdAt: mockProjects[0].createdAt,
+      createdAt:
+        allProjects.find((p) => p.id === "asset-management")?.createdAt ??
+        new Date().toISOString(),
       linkHref: "/projects/asset-management",
     },
     {
