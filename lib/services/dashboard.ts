@@ -3,6 +3,7 @@ import type {
   AppNotification,
   MatchRecommendation,
   Project,
+  ProjectStatus,
   Student,
   Team,
   TeamRequest,
@@ -24,7 +25,7 @@ import { mockProfile } from "@/lib/mock/profile";
  * TODO (Supabase): derive match scores server-side; paginate activity.
  */
 
-export type ProjectStatus = "Recruiting" | "Team Complete" | "In Progress" | "Completed";
+export type { ProjectStatus };
 
 export interface MyProject extends Team {
   role: string;

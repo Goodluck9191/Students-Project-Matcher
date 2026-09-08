@@ -46,7 +46,7 @@ export const mockNotifications: AppNotification[] = [
     id: "notif-5",
     type: "team_added",
     title: "You have been added to a team",
-    body: "You joined Library Seat Booking App as Frontend.",
+    body: "You joined Smart Library Management System as Frontend.",
     isRead: true,
     createdAt: hoursAgo(26),
     linkHref: "/teams",

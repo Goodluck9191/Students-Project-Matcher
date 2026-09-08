@@ -53,6 +53,8 @@ export type ProjectCategory =
 
 export type ProjectType = "Coursework" | "Final Year" | "Hackathon" | "Research" | "Side Project";
 
+export type ProjectStatus = "Recruiting" | "Team Complete" | "In Progress" | "Completed";
+
 export interface Project {
   id: string;
   title: string;
@@ -63,12 +65,33 @@ export interface Project {
   creatorName: string;
   requiredSkills: string[];
   interests: string[];
+  program: string;
+  year?: number;
   maxTeamSize: number;
   currentMembers: number;
+  status: ProjectStatus;
   deadline: string; // ISO date
   matchPercentage?: number; // 0-100 relative to viewer
   createdAt: string;
 }
+
+export const PROJECT_STATUS_OPTIONS: ProjectStatus[] = [
+  "Recruiting",
+  "Team Complete",
+  "In Progress",
+  "Completed",
+];
+
+export const PROJECT_CATEGORY_OPTIONS: ProjectCategory[] = [
+  "Web Development",
+  "AI",
+  "Cybersecurity",
+  "IoT",
+  "Mobile Apps",
+  "Networking",
+  "Data Science",
+  "Software Engineering",
+];
 
 export interface TeamMember {
   studentId: string;
