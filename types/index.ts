@@ -33,6 +33,8 @@ export interface Student {
   year: number;
   bio: string;
   skills: string[];
+  /** Per-skill proficiency; falls back to Intermediate when absent. */
+  skillLevels?: SkillWithLevel[];
   interests: string[];
   availability: AvailabilitySlot[];
   experienceLevel: ExperienceLevel;
@@ -117,11 +119,30 @@ export interface Team {
 export interface MatchRecommendation {
   student: Student;
   score: number; // 0-100
+  tier: MatchTier;
   matchingSkills: string[];
   complementarySkills: string[];
   missingSkillsCovered: string[];
+  /** Overlap between project interests and student interests. */
+  matchingInterests: string[];
+  /** 0-1 overlap between team availability and student availability. */
+  availabilityMatch: number;
+  /** Weighted 0-1 sub-scores per dimension (Stage 6 model). */
+  breakdown: MatchBreakdown;
   reasons: string[];
 }
+
+/** 0-1 sub-scores per matching dimension. Weights live in lib/matching/weights. */
+export interface MatchBreakdown {
+  skill: number;
+  interest: number;
+  availability: number;
+  program: number;
+  experience: number;
+  year: number;
+}
+
+export type MatchTier = "excellent" | "strong" | "good" | "moderate" | "low";
 
 export interface TeamRequest {
   id: string;

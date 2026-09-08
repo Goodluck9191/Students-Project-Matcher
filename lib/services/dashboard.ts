@@ -14,6 +14,7 @@ import { mockTeams } from "@/lib/mock/teams";
 import { mockRequests } from "@/lib/mock/requests";
 import { mockNotifications } from "@/lib/mock/notifications";
 import { mockProfile } from "@/lib/mock/profile";
+import { getMatchTier } from "@/lib/matching/score";
 
 /**
  * Dashboard data layer — Stage 4.
@@ -56,6 +57,7 @@ function delay(ms = 650): Promise<void> {
 function toTeammate(student: Student, projectNeeds: string[]): MatchRecommendation {
   const matchingSkills = student.skills.filter((s) => projectNeeds.includes(s));
   const complementary = student.skills.filter((s) => !projectNeeds.includes(s));
+  const score = student.matchScore ?? 70;
   const reasons = [
     ...matchingSkills.slice(0, 2).map((s) => `Covers needed skill: ${s}`),
     ...complementary.slice(0, 1).map((s) => `Adds something new: ${s}`),
@@ -63,10 +65,21 @@ function toTeammate(student: Student, projectNeeds: string[]): MatchRecommendati
   ];
   return {
     student,
-    score: student.matchScore ?? 70,
+    score,
+    tier: getMatchTier(score),
     matchingSkills,
     complementarySkills: complementary,
     missingSkillsCovered: matchingSkills,
+    matchingInterests: student.interests.slice(0, 2),
+    availabilityMatch: 0.8,
+    breakdown: {
+      skill: 0.8,
+      interest: 0.7,
+      availability: 0.8,
+      program: 0.7,
+      experience: 0.8,
+      year: 0.8,
+    },
     reasons,
   };
 }
