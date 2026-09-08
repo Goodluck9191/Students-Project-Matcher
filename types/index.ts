@@ -161,3 +161,132 @@ export const AVAILABILITY_OPTIONS: AvailabilitySlot[] = [
   "Afternoon",
   "Evening",
 ];
+
+/* ------------------------------------------------------------------ */
+/* Stage 3 — extended profile model (additive; existing types above   */
+/* are unchanged). Shapes mirror the future Supabase `profiles` table */
+/* so mock data can be swapped for queries without touching UI.        */
+/* ------------------------------------------------------------------ */
+
+export type SkillProficiency = "Beginner" | "Intermediate" | "Advanced";
+
+export interface SkillWithLevel {
+  skill: string;
+  level: SkillProficiency;
+}
+
+export type WorkStyle = "Online" | "In Person" | "Hybrid";
+
+export type Weekday =
+  | "Monday"
+  | "Tuesday"
+  | "Wednesday"
+  | "Thursday"
+  | "Friday"
+  | "Saturday"
+  | "Sunday";
+
+export type DayTime = "Morning" | "Afternoon" | "Evening" | "Night";
+
+export interface StudentProfile {
+  id: string;
+  fullName: string;
+  avatarUrl?: string;
+  bio: string;
+  university: string;
+  department?: string;
+  program: string;
+  year: number;
+  graduationYear?: string;
+  skills: SkillWithLevel[];
+  interests: string[];
+  availableDays: Weekday[];
+  dayTimes: DayTime[];
+  workStyle?: WorkStyle;
+  availability: AvailabilitySlot[];
+  experienceLevel: ExperienceLevel;
+  previousExperience?: string;
+  profileCompletion: number; // 0-100
+  updatedAt: string;
+}
+
+export const WEEKDAY_OPTIONS: Weekday[] = [
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+  "Sunday",
+];
+
+export const DAY_TIME_OPTIONS: DayTime[] = ["Morning", "Afternoon", "Evening", "Night"];
+
+export const WORK_STYLE_OPTIONS: WorkStyle[] = ["Online", "In Person", "Hybrid"];
+
+export const SKILL_LEVEL_OPTIONS: SkillProficiency[] = [
+  "Beginner",
+  "Intermediate",
+  "Advanced",
+];
+
+export const PROGRAM_OPTIONS = [
+  "Computer Engineering",
+  "Computer Science",
+  "Information Technology",
+  "Software Engineering",
+  "Electrical Engineering",
+  "Electronics Engineering",
+] as const;
+
+/** Full searchable skill catalogue for the SkillSelector (Stage 3). */
+export const SKILL_CATALOGUE = [
+  "React",
+  "Next.js",
+  "JavaScript",
+  "TypeScript",
+  "HTML",
+  "CSS",
+  "Tailwind CSS",
+  "Node.js",
+  "Express",
+  "Java",
+  "Spring Boot",
+  "Python",
+  "PostgreSQL",
+  "MySQL",
+  "MongoDB",
+  "Supabase",
+  "UI/UX",
+  "Figma",
+  "Git",
+  "GitHub",
+  "Networking",
+  "Cybersecurity",
+  "Machine Learning",
+  "Data Science",
+  "Mobile Development",
+  "IoT",
+  "Testing",
+  "Documentation",
+  "Project Management",
+] as const;
+
+/** Extended interest catalogue for the InterestSelector (Stage 3). */
+export const INTEREST_CATALOGUE = [
+  "Web Development",
+  "Artificial Intelligence",
+  "Machine Learning",
+  "Cybersecurity",
+  "Networking",
+  "IoT",
+  "Mobile Development",
+  "Cloud Computing",
+  "Data Science",
+  "Software Engineering",
+  "Robotics",
+  "Embedded Systems",
+  "UI/UX",
+  "Entrepreneurship",
+  "Open Source",
+] as const;
