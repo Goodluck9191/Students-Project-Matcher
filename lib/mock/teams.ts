@@ -168,6 +168,29 @@ export const mockTeams: Team[] = [
     createdAt: daysAgo(4),
     updatedAt: hoursAgo(30),
   },
+  {
+    id: "team-iot",
+    projectId: "iot-weather",
+    projectTitle: "IoT Campus Weather Station",
+    ownerId: "tom-becker",
+    status: "Recruiting",
+    maxMembers: 4,
+    members: [
+      {
+        studentId: "tom-becker",
+        name: "Tom Becker",
+        role: "Project Lead",
+        skills: ["IoT", "Python"],
+        matchScore: 74,
+        status: "active",
+      },
+    ],
+    skillsCovered: ["IoT"],
+    progress: 10,
+    deadline: daysFromNow(60),
+    createdAt: daysAgo(2),
+    updatedAt: hoursAgo(3),
+  },
 ];
 
 export const mockTeamActivity: TeamActivityItem[] = [

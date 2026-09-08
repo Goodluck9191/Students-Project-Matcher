@@ -4,10 +4,26 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { STUDENT_NAV } from "@/lib/navigation";
+import {
+  usePendingRequestsCount,
+  useUnreadCount,
+} from "@/components/notifications/useNotificationCounts";
 import { Logo } from "./Logo";
+
+function formatCount(n: number): string {
+  return n > 9 ? "9+" : String(n);
+}
 
 export function Sidebar({ className }: { className?: string }) {
   const pathname = usePathname();
+  const unread = useUnreadCount();
+  const pending = usePendingRequestsCount();
+
+  function liveBadge(href: string, fallback?: number): number | undefined {
+    if (href === "/notifications") return unread > 0 ? unread : undefined;
+    if (href === "/requests") return pending > 0 ? pending : undefined;
+    return fallback;
+  }
 
   return (
     <aside
@@ -30,6 +46,7 @@ export function Sidebar({ className }: { className?: string }) {
               pathname === item.href ||
               (item.href !== "/dashboard" && pathname.startsWith(item.href));
             const Icon = item.icon;
+            const badge = liveBadge(item.href, item.badge);
             return (
               <li key={item.href}>
                 <Link
@@ -49,14 +66,14 @@ export function Sidebar({ className }: { className?: string }) {
                     )}
                   />
                   <span className="flex-1 truncate">{item.label}</span>
-                  {typeof item.badge === "number" && (
+                  {typeof badge === "number" && (
                     <span
                       className={cn(
                         "rounded-full px-1.5 py-0.5 text-[11px] font-semibold",
                         active ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-600"
                       )}
                     >
-                      {item.badge}
+                      {formatCount(badge)}
                     </span>
                   )}
                 </Link>

@@ -74,7 +74,7 @@ export default function DashboardPage() {
       <div className="grid gap-6 lg:grid-cols-5">
         <div className="min-w-0 space-y-6 sm:space-y-8 lg:col-span-3">
           <MyProjects projects={data.myProjects} />
-          <PendingRequests received={data.pendingReceived} sent={data.pendingSent} />
+          <PendingRequests />
         </div>
         <div className="min-w-0 space-y-6 sm:space-y-8 lg:col-span-2">
           <ComplementarySkillsCard

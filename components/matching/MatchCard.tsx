@@ -6,22 +6,21 @@ import { Avatar } from "@/components/ui/Avatar";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent } from "@/components/ui/Card";
-import { useToast } from "@/components/ui/Toast";
 import { MatchScore } from "./MatchScore";
 import { MatchingReasons } from "./MatchingReasons";
 import { levelOf } from "@/lib/matching/skillMatcher";
 import type { MatchRecommendation } from "@/types";
 
+export type InviteState = "idle" | "pending" | "member" | "full";
+
 export function MatchCard({
   rec,
-  projectTitle,
-  invited,
+  inviteState,
   onInvite,
 }: {
   rec: MatchRecommendation;
-  projectTitle: string;
-  invited: boolean;
-  onInvite: (studentId: string, studentName: string) => void;
+  inviteState: InviteState;
+  onInvite: (rec: MatchRecommendation) => void;
 }) {
   const { student } = rec;
 
@@ -110,46 +109,45 @@ export function MatchCard({
           <Button href={`/profile/${student.id}`} variant="outline" size="sm" className="flex-1">
             View Profile
           </Button>
-          <InviteButton
-            invited={invited}
-            studentName={student.fullName}
-            onClick={() => onInvite(student.id, student.fullName)}
-            projectTitle={projectTitle}
-          />
+          <InviteStateButton state={inviteState} studentName={student.fullName} onClick={() => onInvite(rec)} />
         </div>
       </CardContent>
     </Card>
   );
 }
 
-function InviteButton({
-  invited,
+function InviteStateButton({
+  state,
   studentName,
-  projectTitle,
   onClick,
 }: {
-  invited: boolean;
+  state: InviteState;
   studentName: string;
-  projectTitle: string;
   onClick: () => void;
 }) {
-  const { success } = useToast();
-  if (invited) {
+  if (state === "member") {
     return (
-      <Button size="sm" variant="secondary" disabled className="flex-1" aria-label={`Invitation sent to ${studentName}`}>
-        <Check className="h-3.5 w-3.5" /> Invitation Sent
+      <Button size="sm" variant="secondary" disabled className="flex-1" aria-label={`${studentName} is already a team member`}>
+        <Check className="h-3.5 w-3.5" /> Team Member
+      </Button>
+    );
+  }
+  if (state === "pending") {
+    return (
+      <Button size="sm" variant="secondary" disabled className="flex-1" aria-label={`Invitation pending for ${studentName}`}>
+        <Check className="h-3.5 w-3.5" /> Invitation Pending
+      </Button>
+    );
+  }
+  if (state === "full") {
+    return (
+      <Button size="sm" variant="outline" disabled className="flex-1" aria-label="Team is full">
+        Team Full
       </Button>
     );
   }
   return (
-    <Button
-      size="sm"
-      className="flex-1"
-      onClick={() => {
-        onClick();
-        success(`Invited ${studentName}`, `${projectTitle} · demo mode, nothing persisted.`);
-      }}
-    >
+    <Button size="sm" className="flex-1" onClick={onClick}>
       <UserPlus className="h-3.5 w-3.5" /> Invite
     </Button>
   );

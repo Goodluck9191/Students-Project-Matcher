@@ -159,7 +159,40 @@ export type TeamMutationError =
   | "OWNER_CANNOT_LEAVE"
   | "NOT_A_MEMBER"
   | "MEMBER_NOT_FOUND"
+  | "ALREADY_MEMBER"
+  | "TEAM_FULL"
   | "TEAM_NOT_FOUND";
+
+/** Reopen a full team when space frees up. */
+function maybeReopen(team: Team): void {
+  if (team.status === "Team Complete" && team.members.length < team.maxMembers) {
+    team.status = "Recruiting";
+    touch(team, "Project status changed to Recruiting");
+  }
+}
+
+/**
+ * Add a member (used by the request accept flow). Flips the team to
+ * Team Complete when the final seat fills.
+ */
+export async function addTeamMember(
+  teamId: string,
+  member: TeamMember
+): Promise<{ ok: true; team: Team } | { ok: false; error: TeamMutationError }> {
+  await delay(400);
+  const team = store().teams.find((t) => t.id === teamId);
+  if (!team) return { ok: false, error: "TEAM_NOT_FOUND" };
+  if (team.members.some((m) => m.studentId === member.studentId))
+    return { ok: false, error: "ALREADY_MEMBER" };
+  if (isTeamFull(team)) return { ok: false, error: "TEAM_FULL" };
+  team.members.push({ ...member, status: member.status ?? "active" });
+  touch(team, `${member.name} joined the team`, member.role);
+  if (isTeamFull(team)) {
+    team.status = "Team Complete";
+    touch(team, "Project status changed to Team Complete");
+  }
+  return { ok: true, team: clone(team) };
+}
 
 export async function updateMemberRole(
   teamId: string,
@@ -192,6 +225,7 @@ export async function removeMember(
   if (member.studentId === team.ownerId) return { ok: false, error: "NOT_OWNER" };
   team.members = team.members.filter((m) => m.studentId !== studentId);
   touch(team, `${member.name} was removed from the team`);
+  maybeReopen(team);
   return { ok: true, team: clone(team) };
 }
 
@@ -207,6 +241,7 @@ export async function leaveTeam(
     return { ok: false, error: "NOT_A_MEMBER" };
   team.members = team.members.filter((m) => m.studentId !== userId);
   touch(team, "A member left the team");
+  maybeReopen(team);
   return { ok: true, team: clone(team) };
 }
 

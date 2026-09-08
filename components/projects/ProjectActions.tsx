@@ -6,22 +6,39 @@ import { Check, Pencil, UserPlus, UsersRound } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import { isProjectOwner } from "@/lib/services/projects";
-import { mockRequests } from "@/lib/mock/requests";
-import type { Project } from "@/types";
+import {
+  REQUEST_ERROR_MESSAGES,
+  findUserProjectRequest,
+  sendJoinRequest,
+} from "@/lib/services/requests";
+import { getTeamForProject, isTeamFull } from "@/lib/services/teams";
+import type { Project, Team } from "@/types";
+
+const CURRENT_USER = "me";
 
 /**
- * Contextual CTA block for project details:
- * owner → Edit + Manage Team; non-owner → Request to Join / Pending / Full.
- * All interactions are mock/local state (no persistence).
+ * Contextual CTA block for project details, driven by live request/team
+ * state: owner → Edit + Manage; member → Team Member; pending → Pending;
+ * full → Team Full; otherwise Request to Join (join_request flow).
  */
 export function ProjectActions({ project }: { project: Project }) {
-  const { success, info } = useToast();
-  const [requested, setRequested] = React.useState(() =>
-    mockRequests.some(
-      (r) =>
-        r.direction === "sent" && r.projectId === project.id && r.status === "pending"
-    )
-  );
+  const { success, error } = useToast();
+  const [team, setTeam] = React.useState<Team | null>(null);
+  const [sending, setSending] = React.useState(false);
+  const [nonce, setNonce] = React.useState(0);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    getTeamForProject(project.id).then((t) => {
+      if (!cancelled) setTeam(t ?? null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [project.id, nonce]);
+
+  // Derived each render (bumped by nonce) so sent requests reflect immediately.
+  const pendingId = findUserProjectRequest(project.id, CURRENT_USER)?.id ?? null;
 
   if (isProjectOwner(project)) {
     return (
@@ -39,8 +56,21 @@ export function ProjectActions({ project }: { project: Project }) {
     );
   }
 
-  const full = project.currentMembers >= project.maxTeamSize;
+  const isMember = team?.members.some((m) => m.studentId === CURRENT_USER) ?? false;
+  if (isMember && team) {
+    return (
+      <div className="flex flex-col gap-2">
+        <Button variant="secondary" disabled className="w-full">
+          <Check className="h-4 w-4" /> Team Member
+        </Button>
+        <Button href={`/teams/${team.id}`} variant="outline" className="w-full">
+          Open Team Workspace
+        </Button>
+      </div>
+    );
+  }
 
+  const full = team ? isTeamFull(team) : project.currentMembers >= project.maxTeamSize;
   if (full) {
     return (
       <Button disabled className="w-full">
@@ -49,23 +79,33 @@ export function ProjectActions({ project }: { project: Project }) {
     );
   }
 
-  if (requested) {
+  if (pendingId) {
     return (
-      <Button variant="secondary" disabled className="w-full">
-        <Check className="h-4 w-4" /> Request Pending
-      </Button>
+      <div className="flex flex-col gap-2">
+        <Button variant="secondary" disabled className="w-full">
+          <Check className="h-4 w-4" /> Request Pending
+        </Button>
+        <Link href="/requests" className="text-center text-sm font-medium text-slate-500 hover:text-slate-800 hover:underline">
+          View in Requests
+        </Link>
+      </div>
     );
   }
 
+  async function handleJoin() {
+    setSending(true);
+    const res = await sendJoinRequest({ projectId: project.id, senderId: CURRENT_USER });
+    setSending(false);
+    if (!res.ok) {
+      error("Couldn't send the request", REQUEST_ERROR_MESSAGES[res.error]);
+      return;
+    }
+    success("Request sent", "The project owner has been notified (demo mode).");
+    setNonce((n) => n + 1);
+  }
+
   return (
-    <Button
-      className="w-full"
-      onClick={() => {
-        setRequested(true);
-        success("Request sent", `${project.title} · demo mode, nothing persisted.`);
-        info("Tip", "Track it under Requests in Stage 8.");
-      }}
-    >
+    <Button className="w-full" loading={sending} onClick={handleJoin}>
       <UserPlus className="h-4 w-4" /> Request to Join
     </Button>
   );

@@ -9,7 +9,6 @@ import { Card, CardContent } from "@/components/ui/Card";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
-import { useToast } from "@/components/ui/Toast";
 import { tierStyles } from "@/lib/matching/score";
 import {
   EMPTY_MATCH_FILTERS,
@@ -17,7 +16,7 @@ import {
   activeMatchFilterCount,
   type MatchFilterValues,
 } from "@/components/matching/MatchFilters";
-import { MatchCard } from "@/components/matching/MatchCard";
+import { MatchCard, type InviteState } from "@/components/matching/MatchCard";
 import { ProjectSelector } from "@/components/matching/ProjectSelector";
 import { SkillGapSummary } from "@/components/matching/SkillGapSummary";
 import { TeamSkillCoverage } from "@/components/matching/TeamSkillCoverage";
@@ -26,6 +25,8 @@ import { calculateMatches, type MatchResult } from "@/lib/matching/matchCalculat
 import { EMPTY_FILTERS, listProjects } from "@/lib/services/projects";
 import { listStudents, getCurrentUserId } from "@/lib/services/students";
 import { listTeams } from "@/lib/services/teams";
+import { findPendingRequest } from "@/lib/services/requests";
+import { InvitationModal } from "@/components/requests/InvitationModal";
 import { cn } from "@/lib/utils";
 import type { MatchRecommendation, Project, Student, Team } from "@/types";
 
@@ -59,14 +60,23 @@ function applyFilters(recs: MatchRecommendation[], f: MatchFilterValues): MatchR
 
 function ListRow({
   rec,
-  invited,
+  inviteState,
   onInvite,
 }: {
   rec: MatchRecommendation;
-  invited: boolean;
+  inviteState: InviteState;
   onInvite: () => void;
 }) {
   const styles = tierStyles(rec.tier);
+  const disabled = inviteState !== "idle";
+  const label =
+    inviteState === "member"
+      ? "Member"
+      : inviteState === "pending"
+        ? "Sent"
+        : inviteState === "full"
+          ? "Full"
+          : "Invite";
   return (
     <li className="flex items-center gap-3 rounded-2xl border border-slate-200/80 bg-white px-4 py-3 shadow-[var(--shadow-card)]">
       <Avatar name={rec.student.fullName} size="sm" />
@@ -86,10 +96,16 @@ function ListRow({
       <span className="rounded-full px-2.5 py-1 text-xs font-bold tabular-nums text-slate-700 sm:hidden">
         {rec.score}%
       </span>
-      <Button size="sm" variant={invited ? "secondary" : "primary"} disabled={invited} onClick={onInvite}>
-        {invited ? (
+      <Button
+        size="sm"
+        variant={disabled ? "secondary" : "primary"}
+        disabled={disabled}
+        onClick={onInvite}
+        aria-label={disabled ? `${label}: ${rec.student.fullName}` : `Invite ${rec.student.fullName}`}
+      >
+        {disabled ? (
           <>
-            <Check className="h-3.5 w-3.5" /> Sent
+            <Check className="h-3.5 w-3.5" /> {label}
           </>
         ) : (
           <>
@@ -106,7 +122,6 @@ function ListRow({
  * UI → services (projects/students/teams) → lib/matching/* (pure).
  */
 export default function MatchesPage() {
-  const { success } = useToast();
   const [projects, setProjects] = React.useState<Project[] | null>(null);
   const [students, setStudents] = React.useState<Student[] | null>(null);
   const [teams, setTeams] = React.useState<Team[] | null>(null);
@@ -115,7 +130,8 @@ export default function MatchesPage() {
   const [filters, setFilters] = React.useState<MatchFilterValues>(EMPTY_MATCH_FILTERS);
   const [view, setView] = React.useState<MatchView>("grid");
   const [filtersOpen, setFiltersOpen] = React.useState(false);
-  const [invited, setInvited] = React.useState<Set<string>>(new Set());
+  const [inviteTarget, setInviteTarget] = React.useState<MatchRecommendation | null>(null);
+  const [justSent, setJustSent] = React.useState<Set<string>>(new Set());
 
   React.useEffect(() => {
     let cancelled = false;
@@ -156,10 +172,23 @@ export default function MatchesPage() {
     [result, filters]
   );
 
-  function handleInvite(studentId: string, studentName: string) {
-    setInvited((prev) => new Set(prev).add(studentId));
+  const memberIds = React.useMemo(() => {
     const project = projects?.find((p) => p.id === selectedId);
-    success(`Invited ${studentName}`, `${project?.title ?? "Project"} · demo mode, nothing persisted.`);
+    const team = teams?.find((t) => t.projectId === project?.id);
+    return new Set(team?.members.map((m) => m.studentId) ?? []);
+  }, [projects, teams, selectedId]);
+
+  const selectedTeam = React.useMemo(() => {
+    const project = projects?.find((p) => p.id === selectedId);
+    return teams?.find((t) => t.projectId === project?.id) ?? null;
+  }, [projects, teams, selectedId]);
+
+  function inviteStateFor(rec: MatchRecommendation): InviteState {
+    if (memberIds.has(rec.student.id)) return "member";
+    if (justSent.has(rec.student.id)) return "pending";
+    if (selectedTeam && findPendingRequest(selectedTeam.id, rec.student.id)) return "pending";
+    if (result?.teamFull) return "full";
+    return "idle";
   }
 
   if (!projects || !students || !teams) {
@@ -314,9 +343,8 @@ export default function MatchesPage() {
                   <MatchCard
                     key={rec.student.id}
                     rec={rec}
-                    projectTitle={project?.title ?? ""}
-                    invited={invited.has(rec.student.id)}
-                    onInvite={handleInvite}
+                    inviteState={inviteStateFor(rec)}
+                    onInvite={setInviteTarget}
                   />
                 ))}
               </div>
@@ -326,8 +354,8 @@ export default function MatchesPage() {
                   <ListRow
                     key={rec.student.id}
                     rec={rec}
-                    invited={invited.has(rec.student.id)}
-                    onInvite={() => handleInvite(rec.student.id, rec.student.fullName)}
+                    inviteState={inviteStateFor(rec)}
+                    onInvite={() => setInviteTarget(rec)}
                   />
                 ))}
               </ul>
@@ -343,6 +371,16 @@ export default function MatchesPage() {
           </div>
         </div>
       )}
+
+      <InvitationModal
+        open={inviteTarget !== null}
+        student={inviteTarget?.student ?? null}
+        team={selectedTeam}
+        gapSkills={inviteTarget?.missingSkillsCovered ?? []}
+        match={inviteTarget?.score}
+        onClose={() => setInviteTarget(null)}
+        onSent={(studentId) => setJustSent((prev) => new Set(prev).add(studentId))}
+      />
     </div>
   );
 }

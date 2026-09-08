@@ -2,13 +2,16 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Bell, Menu, Search } from "lucide-react";
+import { Menu, Search } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/Button";
+import { NotificationBell } from "@/components/notifications/NotificationBadge";
+import { useUnreadCount } from "@/components/notifications/useNotificationCounts";
 import { mockCurrentStudent } from "@/lib/mock/students";
 
 export function Navbar({ onMenuClick }: { onMenuClick: () => void }) {
   const [profileOpen, setProfileOpen] = React.useState(false);
+  const unread = useUnreadCount();
   const menuRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
@@ -46,14 +49,7 @@ export function Navbar({ onMenuClick }: { onMenuClick: () => void }) {
       </div>
       <div className="flex-1 md:hidden" />
 
-      <Link
-        href="/notifications"
-        aria-label="Notifications, 5 unread"
-        className="relative rounded-xl p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
-      >
-        <Bell className="h-5 w-5" />
-        <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-rose-500 ring-2 ring-white" />
-      </Link>
+      <NotificationBell unread={unread} />
 
       <div ref={menuRef} className="relative">
         <button

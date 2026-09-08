@@ -5,8 +5,16 @@ import { usePathname } from "next/navigation";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { STUDENT_NAV } from "@/lib/navigation";
+import {
+  usePendingRequestsCount,
+  useUnreadCount,
+} from "@/components/notifications/useNotificationCounts";
 import { Logo } from "./Logo";
 import { Button } from "@/components/ui/Button";
+
+function formatCount(n: number): string {
+  return n > 9 ? "9+" : String(n);
+}
 
 export function MobileNav({
   open,
@@ -16,6 +24,8 @@ export function MobileNav({
   onClose: () => void;
 }) {
   const pathname = usePathname();
+  const unread = useUnreadCount();
+  const pending = usePendingRequestsCount();
 
   if (!open) return null;
 
@@ -40,6 +50,16 @@ export function MobileNav({
                 pathname === item.href ||
                 (item.href !== "/dashboard" && pathname.startsWith(item.href));
               const Icon = item.icon;
+              const badge =
+                item.href === "/notifications"
+                  ? unread > 0
+                    ? unread
+                    : undefined
+                  : item.href === "/requests"
+                    ? pending > 0
+                      ? pending
+                      : undefined
+                    : item.badge;
               return (
                 <li key={item.href}>
                   <Link
@@ -55,9 +75,9 @@ export function MobileNav({
                   >
                     <Icon className={cn("h-5 w-5", active ? "text-brand-600" : "text-slate-400")} />
                     <span className="flex-1">{item.label}</span>
-                    {typeof item.badge === "number" && (
+                    {typeof badge === "number" && (
                       <span className="rounded-full bg-brand-600 px-1.5 py-0.5 text-[11px] font-semibold text-white">
-                        {item.badge}
+                        {formatCount(badge)}
                       </span>
                     )}
                   </Link>
