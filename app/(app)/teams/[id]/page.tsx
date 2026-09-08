@@ -315,17 +315,20 @@ export default function TeamDetailsPage() {
           <TeamSkillGaps gaps={gaps} />
           <TeamActivity items={activity} />
 
-          <Card className="border-dashed">
-            <CardContent className="flex items-start gap-3 py-5">
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-500">
+          <Card>
+            <CardContent className="flex items-center gap-3 py-5">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
                 <MessageCircle className="h-4 w-4" aria-hidden />
               </span>
-              <div>
-                <h3 className="font-semibold text-slate-900">Team Communication</h3>
+              <div className="min-w-0 flex-1">
+                <h3 className="font-semibold text-slate-900">Team Chat</h3>
                 <p className="mt-0.5 text-sm text-slate-500">
-                  Team Chat will be available in the next stage.
+                  Coordinate work, meetings, and decisions with your team.
                 </p>
               </div>
+              <Button href={`/teams/${team.id}/chat`} size="sm" className="shrink-0">
+                Open Chat
+              </Button>
             </CardContent>
           </Card>
         </div>

@@ -9,6 +9,7 @@ import type {
 } from "@/types";
 import { mockTeamActivity, mockTeams } from "@/lib/mock/teams";
 import { analyzeRequiredSkills, levelOf } from "@/lib/matching/skillMatcher";
+import { postSystemMessage } from "./chat";
 
 /**
  * Team service — single swap point for future Supabase persistence.
@@ -81,6 +82,12 @@ function touch(team: Team, title: string, detail?: string): void {
     detail,
     createdAt: new Date().toISOString(),
   });
+  // Mirror meaningful team events into Team Chat (system message).
+  try {
+    postSystemMessage(team.id, detail ? `${title} — ${detail}` : `${title}.`);
+  } catch {
+    // Chat store unavailable — activity log above is unaffected.
+  }
   persist();
 }
 

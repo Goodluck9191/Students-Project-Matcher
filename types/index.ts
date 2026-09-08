@@ -170,6 +170,24 @@ export interface TeamSkillGap {
   holders: number;
 }
 
+export type MessageType = "user" | "system";
+
+/**
+ * Team chat message. IDs reference teams/students — sender/team resolve
+ * via services (no embedded profiles). `senderId` is null for system
+ * events. Future table: `team_messages` (RLS: members-only read/write).
+ */
+export interface Message {
+  id: string;
+  teamId: string;
+  senderId: string | null;
+  type: MessageType;
+  content: string;
+  createdAt: string;
+}
+
+export const MAX_MESSAGE_LENGTH = 1000;
+
 export interface MatchRecommendation {
   student: Student;
   score: number; // 0-100
