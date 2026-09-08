@@ -40,8 +40,8 @@ export const mockTeams: Team[] = [
   },
   {
     id: "team-library",
-    projectId: "library-booking",
-    projectTitle: "Library Seat Booking App",
+    projectId: "smart-library",
+    projectTitle: "Smart Library Management System",
     maxMembers: 3,
     members: [
       {
