@@ -1,22 +1,117 @@
 import type { Student } from "@/types";
 
 /**
- * Mock students — Stage 1 placeholder.
- * TODO (Supabase): replace with `from("profiles").select(...)` via lib/services/students.ts
+ * Mock students — Stage 4 realistic dataset.
+ * TODO (Supabase): replace with `from("profiles").select(...)` via
+ * lib/services/students.ts (to be created in a later stage).
  */
-export const mockStudents: Student[] = [];
 
 export const mockCurrentStudent: Student = {
   id: "me",
   fullName: "Alex Morgan",
-  university: "Example University",
+  university: "Mbeya University of Science and Technology",
   program: "Computer Science",
   year: 2,
   bio: "Second-year CS student interested in web development and AI. Looking for teammates for coursework projects.",
   skills: ["React", "TypeScript", "Python"],
-  interests: ["Web Development", "AI"],
+  interests: ["Web Development", "Artificial Intelligence"],
   availability: ["Evening", "Weekends"],
   experienceLevel: "Intermediate",
   profileCompletion: 80,
   createdAt: new Date().toISOString(),
 };
+
+const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();
+
+export const mockStudents: Student[] = [
+  {
+    id: "sarah-michael",
+    fullName: "Sarah Michael",
+    university: "Mbeya University of Science and Technology",
+    program: "Computer Engineering",
+    year: 2,
+    bio: "Frontend-leaning engineer who loves design systems and usable interfaces.",
+    skills: ["UI/UX", "Figma", "React", "Tailwind CSS"],
+    interests: ["Web Development", "UI/UX", "Software Engineering"],
+    availability: ["Evening", "Weekends"],
+    experienceLevel: "Intermediate",
+    profileCompletion: 100,
+    matchScore: 94,
+    createdAt: hoursAgo(24 * 30),
+  },
+  {
+    id: "john-michael",
+    fullName: "John Michael",
+    university: "Mbeya University of Science and Technology",
+    program: "Information Technology",
+    year: 3,
+    bio: "Backend developer focused on APIs and databases. Hackathon regular.",
+    skills: ["Node.js", "Express", "PostgreSQL", "Git"],
+    interests: ["Web Development", "Open Source"],
+    availability: ["Afternoon", "Weekdays"],
+    experienceLevel: "Advanced",
+    profileCompletion: 95,
+    matchScore: 91,
+    createdAt: hoursAgo(24 * 60),
+  },
+  {
+    id: "priya-nair",
+    fullName: "Priya Nair",
+    university: "Mbeya University of Science and Technology",
+    program: "Software Engineering",
+    year: 2,
+    bio: "Full-stack builder who enjoys turning coursework into polished products.",
+    skills: ["React", "Node.js", "Supabase", "Testing"],
+    interests: ["Web Development", "Cloud Computing"],
+    availability: ["Evening", "Weekdays"],
+    experienceLevel: "Intermediate",
+    profileCompletion: 88,
+    matchScore: 86,
+    createdAt: hoursAgo(24 * 20),
+  },
+  {
+    id: "grace-lee",
+    fullName: "Grace Lee",
+    university: "Mbeya University of Science and Technology",
+    program: "Computer Science",
+    year: 1,
+    bio: "First-year student keen on testing, docs, and learning fast on real projects.",
+    skills: ["Testing", "Documentation", "HTML", "CSS"],
+    interests: ["Web Development", "Open Source"],
+    availability: ["Morning", "Weekends"],
+    experienceLevel: "Beginner",
+    profileCompletion: 76,
+    matchScore: 78,
+    createdAt: hoursAgo(24 * 9),
+  },
+  {
+    id: "david-kim",
+    fullName: "David Kim",
+    university: "Mbeya University of Science and Technology",
+    program: "Data Science",
+    year: 4,
+    bio: "Final-year data student working on ML models for campus research.",
+    skills: ["Python", "Machine Learning", "PostgreSQL", "GitHub"],
+    interests: ["Data Science", "Artificial Intelligence"],
+    availability: ["Afternoon", "Weekdays"],
+    experienceLevel: "Advanced",
+    profileCompletion: 100,
+    matchScore: 72,
+    createdAt: hoursAgo(24 * 120),
+  },
+  {
+    id: "tom-becker",
+    fullName: "Tom Becker",
+    university: "Mbeya University of Science and Technology",
+    program: "Electrical Engineering",
+    year: 3,
+    bio: "Embedded and IoT enthusiast. solders, codes, and documents.",
+    skills: ["IoT", "Python", "Networking", "Documentation"],
+    interests: ["IoT", "Embedded Systems", "Robotics"],
+    availability: ["Weekends", "Evening"],
+    experienceLevel: "Intermediate",
+    profileCompletion: 84,
+    matchScore: 68,
+    createdAt: hoursAgo(24 * 45),
+  },
+];

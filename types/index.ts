@@ -123,6 +123,15 @@ export interface AppNotification {
   linkHref?: string;
 }
 
+/** Recent-activity feed entry (dashboard). Derived from notifications + requests. */
+export interface ActivityItem {
+  id: string;
+  title: string;
+  detail?: string;
+  createdAt: string;
+  linkHref?: string;
+}
+
 /** Canonical skill / interest option lists (used by selectors). */
 export const SKILL_OPTIONS = [
   "React",
