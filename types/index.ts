@@ -102,18 +102,60 @@ export interface TeamMember {
   role: string;
   skills: string[];
   matchScore: number;
+  /** Enriched from the student profile at render time (IDs link, not copies). */
+  program?: string;
+  year?: number;
+  availability?: string[];
+  status?: TeamMemberStatus;
 }
+
+export type TeamMemberStatus = "active" | "invited";
 
 export interface Team {
   id: string;
   projectId: string;
   projectTitle: string;
+  /** Student id of the team owner (usually the project creator). */
+  ownerId: string;
+  status: ProjectStatus;
   members: TeamMember[];
   maxMembers: number;
   skillsCovered: string[];
   progress: number; // 0-100
   deadline: string;
+  createdAt: string;
   updatedAt: string;
+}
+
+/** Assignable team roles — deliberately independent from skills. */
+export const TEAM_ROLE_OPTIONS = [
+  "Project Lead",
+  "Frontend Developer",
+  "Backend Developer",
+  "Database Developer",
+  "UI/UX Designer",
+  "Mobile Developer",
+  "Tester / QA",
+  "Documentation",
+  "Researcher",
+  "Other",
+] as const;
+
+export type TeamRole = (typeof TEAM_ROLE_OPTIONS)[number];
+
+export interface TeamActivityItem {
+  id: string;
+  teamId: string;
+  title: string;
+  detail?: string;
+  createdAt: string;
+}
+
+/** Display-level skill gap state (counts come from the engine's team analysis). */
+export interface TeamSkillGap {
+  skill: string;
+  status: "covered" | "partial" | "missing";
+  holders: number;
 }
 
 export interface MatchRecommendation {
