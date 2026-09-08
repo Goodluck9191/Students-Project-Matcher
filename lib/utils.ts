@@ -37,6 +37,12 @@ export function timeAgo(date: string | Date): string {
   return formatDate(d);
 }
 
+/** Whole days from now until a date (negative when overdue). */
+export function daysUntil(date: string | Date): number {
+  const d = typeof date === "string" ? new Date(date) : date;
+  return Math.ceil((d.getTime() - Date.now()) / 86_400_000);
+}
+
 /** Clamp a number between min and max. */
 export function clamp(value: number, min = 0, max = 100): number {
   return Math.min(max, Math.max(min, value));

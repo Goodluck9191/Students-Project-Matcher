@@ -11,10 +11,10 @@ import type {
 import { mockCurrentStudent, mockStudents } from "@/lib/mock/students";
 import { mockProjects } from "@/lib/mock/projects";
 import { mockTeams } from "@/lib/mock/teams";
-import { mockRequests } from "@/lib/mock/requests";
-import { mockNotifications } from "@/lib/mock/notifications";
 import { mockProfile } from "@/lib/mock/profile";
 import { getMatchTier } from "@/lib/matching/score";
+import { getReceivedRequests, getSentRequests } from "./requests";
+import { getNotifications, getUnreadCount } from "./notifications";
 
 /**
  * Dashboard data layer — Stage 4.
@@ -108,25 +108,28 @@ export async function getDashboardData(): Promise<DashboardData> {
     .slice(0, 3)
     .map((s) => toTeammate(s, projectNeeds));
 
-  const pendingReceived = mockRequests.filter(
-    (r) => r.direction === "received" && r.status === "pending"
-  );
-  const pendingSent = mockRequests.filter((r) => r.direction === "sent");
-  const unreadCount = mockNotifications.filter((n) => !n.isRead).length;
+  const [received, sent, notifications, unreadCount] = await Promise.all([
+    getReceivedRequests("me"),
+    getSentRequests("me"),
+    getNotifications("me"),
+    getUnreadCount("me"),
+  ]);
+  const pendingReceived = received.filter((r) => r.status === "pending");
+  const pendingSent = sent;
 
   const activity: ActivityItem[] = [
     {
       id: "act-1",
       title: "Sarah accepted your invitation",
       detail: "University Asset Management System",
-      createdAt: mockNotifications[2].createdAt,
+      createdAt: notifications[2]?.createdAt ?? new Date().toISOString(),
       linkHref: "/teams",
     },
     {
       id: "act-2",
       title: "You received a new teammate recommendation",
       detail: "Sarah Michael · 94% match",
-      createdAt: mockNotifications[1].createdAt,
+      createdAt: notifications[1]?.createdAt ?? new Date().toISOString(),
       linkHref: "/matches",
     },
     {
@@ -139,13 +142,13 @@ export async function getDashboardData(): Promise<DashboardData> {
       id: "act-4",
       title: "John requested to join your project",
       detail: "University Asset Management System · 91%",
-      createdAt: mockRequests[0].createdAt,
+      createdAt: received[0]?.createdAt ?? new Date().toISOString(),
       linkHref: "/requests",
     },
     {
       id: "act-5",
       title: "Your profile reached 80% completion",
-      createdAt: mockRequests[1].createdAt,
+      createdAt: received[1]?.createdAt ?? new Date().toISOString(),
       linkHref: "/profile/setup",
     },
   ];
@@ -166,7 +169,7 @@ export async function getDashboardData(): Promise<DashboardData> {
     activity,
     pendingReceived,
     pendingSent,
-    notifications: mockNotifications.slice(0, 4),
+    notifications: notifications.slice(0, 4),
     unreadCount,
     strongestSkills: ["React", "TypeScript", "Node.js"],
     missingSkills: ["UI/UX", "Testing", "Documentation"],

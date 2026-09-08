@@ -5,31 +5,53 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Badge } from "@/components/ui/Badge";
-import { Button } from "@/components/ui/Button";
 import { Card, CardContent } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/States";
-import { useToast } from "@/components/ui/Toast";
-import type { TeamRequest } from "@/types";
+import { RequestActions } from "@/components/requests/RequestCard";
+import {
+  enrichRequests,
+  getReceivedRequests,
+  getSentRequests,
+  type EnrichedRequest,
+} from "@/lib/services/requests";
+import { EMPTY_FILTERS, listProjects } from "@/lib/services/projects";
+import { listStudents } from "@/lib/services/students";
+import { listTeams } from "@/lib/services/teams";
 
-/** Compact pending-requests widget with mock accept/reject (local state only). */
-export function PendingRequests({
-  received,
-  sent,
-}: {
-  received: TeamRequest[];
-  sent: TeamRequest[];
-}) {
-  const { success, info } = useToast();
-  const [incoming, setIncoming] = React.useState(received);
+const CURRENT_USER = "me";
 
-  function respond(id: string, accept: boolean) {
-    const req = incoming.find((r) => r.id === id);
-    setIncoming((prev) => prev.filter((r) => r.id !== id));
-    if (req) {
-      if (accept) success(`Accepted ${req.studentName}`, `${req.projectTitle} · demo mode, nothing persisted.`);
-      else info(`Rejected ${req.studentName}`, "They won't be notified in demo mode.");
-    }
-  }
+/**
+ * Compact pending-requests widget wired to the live request service —
+ * accepting here updates teams, capacity, activity, and notifications,
+ * exactly like the full /requests page.
+ */
+export function PendingRequests() {
+  const [views, setViews] = React.useState<EnrichedRequest[] | null>(null);
+  const [nonce, setNonce] = React.useState(0);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      getReceivedRequests(CURRENT_USER),
+      getSentRequests(CURRENT_USER),
+      listStudents(),
+      listProjects(EMPTY_FILTERS),
+      listTeams(),
+    ]).then(([received, sent, students, projects, teams]) => {
+      if (cancelled) return;
+      const pending = [
+        ...received.filter((r) => r.status === "pending"),
+        ...sent.filter((r) => r.status === "pending"),
+      ];
+      setViews(enrichRequests(pending, students, projects, teams, CURRENT_USER));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [nonce]);
+
+  const incoming = (views ?? []).filter((v) => v.request.recipientId === CURRENT_USER);
+  const outgoing = (views ?? []).filter((v) => v.request.senderId === CURRENT_USER);
 
   return (
     <section aria-labelledby="pending-requests" className="min-w-0">
@@ -44,7 +66,7 @@ export function PendingRequests({
           View All <ArrowRight className="h-4 w-4" aria-hidden />
         </Link>
       </div>
-      {incoming.length === 0 && sent.length === 0 ? (
+      {views !== null && incoming.length === 0 && outgoing.length === 0 ? (
         <div className="mt-4">
           <EmptyState
             title="No pending requests"
@@ -54,44 +76,42 @@ export function PendingRequests({
       ) : (
         <Card className="mt-4">
           <CardContent className="space-y-3 py-4">
-            {incoming.map((r) => (
-              <div
-                key={r.id}
-                className="rounded-xl border border-slate-200 p-3.5"
-              >
+            {incoming.slice(0, 2).map((v) => (
+              <div key={v.request.id} className="rounded-xl border border-slate-200 p-3.5">
                 <div className="flex items-center gap-2.5">
-                  <Avatar name={r.studentName} size="sm" />
+                  <Avatar name={v.counterpart?.fullName ?? "Student"} size="sm" />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-semibold text-slate-900">
-                      {r.studentName}
+                      {v.counterpart?.fullName ?? "A student"}
                     </p>
                     <p className="truncate text-xs text-slate-500">
-                      wants to join · {r.projectTitle} · {r.match}% match
+                      {v.request.type === "invitation" ? "invited you to join" : "wants to join"} · {v.projectTitle}
+                      {v.request.match ? ` · ${v.request.match}% match` : ""}
                     </p>
                   </div>
                 </div>
-                <div className="mt-2.5 flex gap-2">
-                  <Button size="sm" className="flex-1" onClick={() => respond(r.id, true)}>
-                    Accept
-                  </Button>
-                  <Button size="sm" variant="outline" className="flex-1" onClick={() => respond(r.id, false)}>
-                    Reject
-                  </Button>
+                <div className="mt-2.5">
+                  <RequestActions view={v} onChanged={() => setNonce((n) => n + 1)} />
                 </div>
               </div>
             ))}
-            {sent.filter((r) => r.status === "pending").map((r) => (
+            {outgoing.slice(0, 3).map((v) => (
               <div
-                key={r.id}
+                key={v.request.id}
                 className="flex items-center gap-2.5 rounded-xl bg-slate-50 px-3.5 py-3 ring-1 ring-inset ring-slate-100"
               >
-                <Avatar name={r.studentName} size="sm" />
+                <Avatar name={v.counterpart?.fullName ?? "Student"} size="sm" />
                 <p className="min-w-0 flex-1 truncate text-[13px] text-slate-600">
-                  You invited <span className="font-semibold">{r.studentName}</span>
+                  You invited <span className="font-semibold">{v.counterpart?.fullName ?? "a student"}</span>
                 </p>
                 <Badge variant="warning">Pending</Badge>
               </div>
             ))}
+            {(incoming.length > 2 || outgoing.length > 3) && (
+              <Link href="/requests" className="block text-center text-[13px] font-medium text-brand-700 hover:underline">
+                See all pending requests
+              </Link>
+            )}
           </CardContent>
         </Card>
       )}

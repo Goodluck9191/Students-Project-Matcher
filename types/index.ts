@@ -16,13 +16,25 @@ export type AvailabilitySlot =
 
 export type RequestStatus = "pending" | "accepted" | "rejected" | "cancelled";
 
+/** Alias used by the request service and UI. */
+export type TeamRequestStatus = RequestStatus;
+
+export type RequestType = "invitation" | "join_request";
+
 export type NotificationType =
   | "invitation"
   | "request_accepted"
   | "request_rejected"
   | "match"
   | "team_added"
-  | "project";
+  | "project"
+  | "team_invitation"
+  | "invitation_accepted"
+  | "invitation_rejected"
+  | "team_member_joined"
+  | "team_full"
+  | "team_status_changed"
+  | "system";
 
 export interface Student {
   id: string;
@@ -102,18 +114,60 @@ export interface TeamMember {
   role: string;
   skills: string[];
   matchScore: number;
+  /** Enriched from the student profile at render time (IDs link, not copies). */
+  program?: string;
+  year?: number;
+  availability?: string[];
+  status?: TeamMemberStatus;
 }
+
+export type TeamMemberStatus = "active" | "invited";
 
 export interface Team {
   id: string;
   projectId: string;
   projectTitle: string;
+  /** Student id of the team owner (usually the project creator). */
+  ownerId: string;
+  status: ProjectStatus;
   members: TeamMember[];
   maxMembers: number;
   skillsCovered: string[];
   progress: number; // 0-100
   deadline: string;
+  createdAt: string;
   updatedAt: string;
+}
+
+/** Assignable team roles — deliberately independent from skills. */
+export const TEAM_ROLE_OPTIONS = [
+  "Project Lead",
+  "Frontend Developer",
+  "Backend Developer",
+  "Database Developer",
+  "UI/UX Designer",
+  "Mobile Developer",
+  "Tester / QA",
+  "Documentation",
+  "Researcher",
+  "Other",
+] as const;
+
+export type TeamRole = (typeof TEAM_ROLE_OPTIONS)[number];
+
+export interface TeamActivityItem {
+  id: string;
+  teamId: string;
+  title: string;
+  detail?: string;
+  createdAt: string;
+}
+
+/** Display-level skill gap state (counts come from the engine's team analysis). */
+export interface TeamSkillGap {
+  skill: string;
+  status: "covered" | "partial" | "missing";
+  holders: number;
 }
 
 export interface MatchRecommendation {
@@ -144,27 +198,38 @@ export interface MatchBreakdown {
 
 export type MatchTier = "excellent" | "strong" | "good" | "moderate" | "low";
 
+/**
+ * Team request v2 — IDs are the source of truth (Supabase-ready:
+ * future `team_requests` table). Display names resolve via services so
+ * student/project records are never duplicated here.
+ */
 export interface TeamRequest {
   id: string;
-  direction: "received" | "sent";
-  studentId: string;
-  studentName: string;
-  avatarUrl?: string;
   projectId: string;
-  projectTitle: string;
-  match: number;
+  teamId: string;
+  senderId: string;
+  recipientId: string;
+  type: RequestType;
   status: RequestStatus;
+  message?: string;
+  /** Demo match score snapshot (0-100) shown beside the request. */
+  match?: number;
   createdAt: string;
+  respondedAt?: string;
 }
 
 export interface AppNotification {
   id: string;
+  /** Owner of the notification (future RLS: users see only their own). */
+  userId: string;
   type: NotificationType;
   title: string;
   body: string;
   isRead: boolean;
   createdAt: string;
   linkHref?: string;
+  /** Related entity id (request / team / project) for deep-linking. */
+  relatedId?: string;
 }
 
 /** Recent-activity feed entry (dashboard). Derived from notifications + requests. */
