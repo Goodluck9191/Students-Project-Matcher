@@ -5,7 +5,6 @@ import { Button } from "@/components/ui/Button";
 import { Card, CardContent } from "@/components/ui/Card";
 import { Progress } from "@/components/ui/Progress";
 import { TeamStatus } from "./TeamStatus";
-import { getUnreadMessageCount } from "@/lib/services/chat";
 import { openPositions } from "@/lib/services/teams";
 import { formatDate } from "@/lib/utils";
 import type { Team } from "@/types";
@@ -14,13 +13,15 @@ export function TeamCard({
   team,
   category,
   ownerName,
+  unread = 0,
 }: {
   team: Team;
   category: string;
   ownerName: string;
+  /** Chat unread count (loaded by the parent; defaults to none). */
+  unread?: number;
 }) {
   const open = openPositions(team);
-  const unread = getUnreadMessageCount(team.id, "me");
   return (
     <Card className="flex h-full flex-col">
       <CardContent className="flex flex-1 flex-col py-5">

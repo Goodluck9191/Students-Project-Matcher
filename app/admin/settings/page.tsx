@@ -8,6 +8,7 @@ import { Input, Select } from "@/components/ui/Input";
 import { useToast } from "@/components/ui/Toast";
 import {
   getAdminSettings,
+  getAdminSettingsAsync,
   getMatchingTierCutoffs,
   getMatchingWeights,
   saveAdminSettings,
@@ -19,6 +20,16 @@ export default function AdminSettingsPage() {
   const { success } = useToast();
   const [settings, setSettings] = React.useState<AdminSettings>(() => getAdminSettings());
   const [saved, setSaved] = React.useState(false);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    getAdminSettingsAsync().then((s) => {
+      if (!cancelled) setSettings(s);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   function set<K extends keyof AdminSettings>(key: K, value: AdminSettings[K]) {
     setSettings((prev) => ({ ...prev, [key]: value }));

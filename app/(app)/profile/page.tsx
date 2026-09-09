@@ -21,6 +21,8 @@ import { PROGRAM_OPTIONS } from "@/types";
 import { mockProfile } from "@/lib/mock/profile";
 import {
   computeCompletion,
+  loadPersistedProfile,
+  persistProfile,
   validateComplete,
   type ProfileErrors,
 } from "@/lib/services/profile";
@@ -41,26 +43,45 @@ export default function OwnProfilePage() {
   const [draft, setDraft] = React.useState(mockProfile);
   const [errors, setErrors] = React.useState<ProfileErrors>({});
 
+  React.useEffect(() => {
+    let cancelled = false;
+    loadPersistedProfile().then((saved) => {
+      if (!cancelled && saved) {
+        setProfile(saved);
+        setDraft(saved);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   function startEdit() {
     setDraft(profile);
     setErrors({});
     setEditing(true);
   }
 
-  function handleSave() {
+  async function handleSave() {
     const validation = validateComplete(draft);
     setErrors(validation);
     if (Object.keys(validation).length > 0) {
       error("Profile incomplete", "Please fix the highlighted fields.");
       return;
     }
-    setProfile({
+    const updated = {
       ...draft,
       profileCompletion: computeCompletion(draft),
       updatedAt: new Date().toISOString(),
-    });
+    };
+    const saved = await persistProfile(updated);
+    if (!saved.ok) {
+      error("Couldn't save your profile", saved.error);
+      return;
+    }
+    setProfile(updated);
     setEditing(false);
-    success("Profile updated", "Your changes are saved (demo mode).");
+    success("Profile updated", "Your changes are saved.");
   }
 
   if (!editing) {

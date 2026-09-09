@@ -1,6 +1,10 @@
 import type { Message, Team } from "@/types";
 import { MAX_MESSAGE_LENGTH } from "@/types";
 import { mockMessages } from "@/lib/mock/messages";
+import { isSupabaseConfigured } from "@/lib/supabase/config";
+import { createClient } from "@/lib/supabase/client";
+import { mapTeamMessage, type DbTeamMessage } from "@/lib/supabase/mappers";
+import { deleteChatMessageAction, sendChatMessageAction } from "@/lib/actions/chat";
 
 /**
  * Chat service — session-scoped mock store for team-only messaging.
@@ -85,12 +89,50 @@ export function canAccessChat(
 /* --------------------------------- reads ---------------------------------- */
 
 export async function getTeamMessages(teamId: string): Promise<Message[]> {
+  if (isSupabaseConfigured()) {
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from("team_messages")
+      .select("*")
+      .eq("team_id", teamId)
+      .order("created_at", { ascending: true })
+      .limit(500);
+    if (error || !data) return [];
+    return (data as DbTeamMessage[]).map(mapTeamMessage);
+  }
   await delay();
   return clone(
     store()
       .filter((m) => m.teamId === teamId)
       .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
   );
+}
+
+/**
+ * Realtime subscription for a team's chat (Supabase mode only).
+ * Caller passes the team id; the channel filter scopes delivery so users
+ * never receive other teams' messages. Returns an unsubscribe function.
+ * No-op (returns noop) in mock mode.
+ */
+export function subscribeToTeamMessages(
+  teamId: string,
+  onMessage: (message: Message) => void
+): () => void {
+  if (!isSupabaseConfigured()) return () => {};
+  const supabase = createClient();
+  const channel = supabase
+    .channel(`team-chat:${teamId}`)
+    .on(
+      "postgres_changes",
+      { event: "INSERT", schema: "public", table: "team_messages", filter: `team_id=eq.${teamId}` },
+      (payload) => {
+        onMessage(mapTeamMessage(payload.new as DbTeamMessage));
+      }
+    )
+    .subscribe();
+  return () => {
+    void supabase.removeChannel(channel);
+  };
 }
 
 export function getUnreadMessageCount(teamId: string, userId: string): number {
@@ -103,6 +145,25 @@ export function getUnreadMessageCount(teamId: string, userId: string): number {
       m.senderId !== userId &&
       m.createdAt > since
   ).length;
+}
+
+/** DB-aware unread count (async; same last-read semantics). */
+export async function getUnreadMessageCountAsync(
+  teamId: string,
+  userId: string
+): Promise<number> {
+  if (!isSupabaseConfigured()) return getUnreadMessageCount(teamId, userId);
+  const lastRead = readLastRead()[teamId];
+  if (!lastRead) return 0;
+  const supabase = createClient();
+  const { count } = await supabase
+    .from("team_messages")
+    .select("id", { count: "exact", head: true })
+    .eq("team_id", teamId)
+    .eq("message_type", "user")
+    .neq("sender_id", userId)
+    .gt("created_at", lastRead);
+  return count ?? 0;
 }
 
 export function markChatAsRead(teamId: string): void {
@@ -118,12 +179,13 @@ export function markChatAsRead(teamId: string): void {
 
 /* --------------------------------- writes ---------------------------------- */
 
-export type ChatSendError = "EMPTY" | "TOO_LONG" | "DUPLICATE";
+export type ChatSendError = "EMPTY" | "TOO_LONG" | "DUPLICATE" | "FAILED";
 
 export const CHAT_ERROR_MESSAGES: Record<ChatSendError, string> = {
   EMPTY: "Message cannot be empty.",
   TOO_LONG: `Messages are limited to ${MAX_MESSAGE_LENGTH} characters.`,
   DUPLICATE: "This message was just sent — waiting to avoid a duplicate.",
+  FAILED: "Couldn't send the message. Check your connection and membership.",
 };
 
 function newId(prefix: string): string {
@@ -135,10 +197,28 @@ export async function sendMessage(
   senderId: string,
   content: string
 ): Promise<{ ok: true; message: Message } | { ok: false; error: ChatSendError }> {
-  await delay(250);
   const text = content.trim();
   if (!text) return { ok: false, error: "EMPTY" };
   if (text.length > MAX_MESSAGE_LENGTH) return { ok: false, error: "TOO_LONG" };
+  if (isSupabaseConfigured()) {
+    // Sender is re-derived server-side; duplicate guard is local-session only.
+    const res = await sendChatMessageAction(teamId, text);
+    if (!res.ok) {
+      if (res.code === "VALIDATION") return { ok: false, error: "EMPTY" };
+      return { ok: false, error: "FAILED" };
+    }
+    const fresh = await getTeamMessages(teamId);
+    const sent = fresh.find((m) => m.id === res.data.id) ?? {
+      id: res.data.id,
+      teamId,
+      senderId,
+      type: "user" as const,
+      content: text,
+      createdAt: new Date().toISOString(),
+    };
+    return { ok: true, message: sent };
+  }
+  await delay(250);
   const recent = store().find(
     (m) =>
       m.teamId === teamId &&
@@ -168,6 +248,14 @@ export async function deleteMessage(
   messageId: string,
   userId: string
 ): Promise<{ ok: true } | { ok: false; error: ChatDeleteError }> {
+  if (isSupabaseConfigured()) {
+    const res = await deleteChatMessageAction(messageId);
+    if (!res.ok) {
+      if (res.code === "FORBIDDEN") return { ok: false, error: "FORBIDDEN" };
+      return { ok: false, error: "NOT_FOUND" };
+    }
+    return { ok: true };
+  }
   await delay(250);
   const list = store();
   const idx = list.findIndex((m) => m.id === messageId);
@@ -184,8 +272,22 @@ export async function deleteMessage(
 /**
  * Append a team-event system message (called by the teams service when
  * membership/roles/status change — keeps chat in sync without UI edits).
+ * Supabase mode fans out through the `post_system_message` RPC (membership
+ * checked server-side); Realtime delivers it to viewers.
  */
 export function postSystemMessage(teamId: string, content: string): Message {
+  if (isSupabaseConfigured()) {
+    const supabase = createClient();
+    void supabase.rpc("post_system_message", { p_team_id: teamId, p_content: content });
+    return {
+      id: `sys-${Date.now().toString(36)}`,
+      teamId,
+      senderId: null,
+      type: "system",
+      content,
+      createdAt: new Date().toISOString(),
+    };
+  }
   const message: Message = {
     id: newId("sys"),
     teamId,

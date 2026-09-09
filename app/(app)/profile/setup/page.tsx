@@ -29,6 +29,8 @@ import {
   clearDraft,
   computeCompletion,
   loadDraft,
+  loadPersistedProfile,
+  persistProfile,
   saveDraft,
   validateStep,
   type ProfileErrors,
@@ -57,7 +59,7 @@ function deriveAvailabilitySlots(draft: StudentProfile): AvailabilitySlot[] {
 }
 
 export default function ProfileSetupPage() {
-  const { success } = useToast();
+  const { success, error: toastError } = useToast();
   const [draft, setDraft] = React.useState<StudentProfile>(() => emptyInitial());
   const [hydrated, setHydrated] = React.useState(false);
   const [stepIndex, setStepIndex] = React.useState(0);
@@ -89,14 +91,20 @@ export default function ProfileSetupPage() {
     };
   }
 
-  /* eslint-disable react-hooks/set-state-in-effect -- mount-only load:
-     localStorage is unavailable during SSR, so the persisted draft must be
-     read into state once after hydration. */
+  // Mount-only load: localStorage is unavailable during SSR, so the
+  // persisted draft must be read into state once after hydration.
   React.useEffect(() => {
-    setDraft(loadDraft());
-    setHydrated(true);
+    let cancelled = false;
+    (async () => {
+      const saved = await loadPersistedProfile();
+      if (cancelled) return;
+      setDraft(saved ?? loadDraft());
+      setHydrated(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   React.useEffect(() => {
     if (hydrated) saveDraft(draft);
@@ -140,7 +148,7 @@ export default function ProfileSetupPage() {
     setErrors({});
   }
 
-  function handleFinish() {
+  async function handleFinish() {
     const all = validateStep("review", draft);
     setErrors(all);
     if (Object.keys(all).length > 0) {
@@ -161,6 +169,11 @@ export default function ProfileSetupPage() {
     };
     setDraft(done);
     saveDraft(done);
+    const saved = await persistProfile(done);
+    if (!saved.ok) {
+      toastError("Couldn't save your profile", saved.error);
+      return;
+    }
     clearDraft();
     setFinished(true);
     success("Profile complete", "Your profile is ready for matching.");

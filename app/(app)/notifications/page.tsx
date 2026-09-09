@@ -17,20 +17,26 @@ import {
   getNotifications,
   markAllAsRead,
 } from "@/lib/services/notifications";
+import { getSessionIdentity } from "@/lib/services/session";
 import type { AppNotification } from "@/types";
-
-const CURRENT_USER = "me";
 
 /** Notification center — event-driven, actionable, read-state aware. */
 export default function NotificationsPage() {
   const { success, error } = useToast();
   const [items, setItems] = React.useState<AppNotification[] | null>(null);
+  const [myId, setMyId] = React.useState("me");
   const [failed, setFailed] = React.useState(false);
   const [filter, setFilter] = React.useState<NotificationFilter>("all");
   const [marking, setMarking] = React.useState(false);
 
   const load = React.useCallback(() => {
-    getNotifications(CURRENT_USER).then(setItems).catch(() => setFailed(true));
+    getSessionIdentity()
+      .then((identity) => {
+        setMyId(identity.id);
+        return getNotifications(identity.id);
+      })
+      .then(setItems)
+      .catch(() => setFailed(true));
   }, []);
 
   React.useEffect(() => {
@@ -43,7 +49,7 @@ export default function NotificationsPage() {
   async function handleMarkAll() {
     setMarking(true);
     try {
-      const count = await markAllAsRead(CURRENT_USER);
+      const count = await markAllAsRead(myId);
       setItems((prev) => (prev ?? []).map((n) => ({ ...n, isRead: true })));
       success(count > 0 ? "All caught up" : "Nothing to mark", count > 0 ? `${count} notification${count === 1 ? "" : "s"} marked as read.` : "You have no unread notifications.");
     } catch {

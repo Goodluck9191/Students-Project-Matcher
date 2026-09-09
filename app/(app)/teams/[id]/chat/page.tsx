@@ -28,13 +28,15 @@ import {
 } from "@/lib/services/chat";
 import { getTeamById } from "@/lib/services/teams";
 import { listStudents } from "@/lib/services/students";
+import { getSessionIdentity } from "@/lib/services/session";
+import { isSupabaseConfigured } from "@/lib/supabase/config";
+import { subscribeToTeamMessages } from "@/lib/services/chat";
 import type { Message, Student, Team } from "@/types";
-
-const CURRENT_USER = "me";
 
 /**
  * Team-only chat. Membership gates everything: non-members see an
  * access-denied state and messages are never fetched for them.
+ * Supabase mode adds a per-team Realtime subscription on top.
  */
 export default function TeamChatPage() {
   const params = useParams<{ id: string }>();
@@ -47,37 +49,32 @@ export default function TeamChatPage() {
   const [sending, setSending] = React.useState(false);
   const [deletingId, setDeletingId] = React.useState<string | null>(null);
   const [membersOpen, setMembersOpen] = React.useState(false);
+  const [myId, setMyId] = React.useState("me");
+  const [myName, setMyName] = React.useState("You");
   const bottomRef = React.useRef<HTMLDivElement | null>(null);
   const didInitialScroll = React.useRef(false);
 
   React.useEffect(() => {
     let cancelled = false;
-    Promise.all([getTeamById(params.id), listStudents()])
-      .then(async ([t, s]) => {
-        if (cancelled) return;
-        setTeam(t);
-        setStudents(s);
-        if (t && canAccessChat(t, CURRENT_USER)) {
-          setMessages(await getTeamMessages(t.id));
-          markChatAsRead(t.id);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
-      });
+    (async () => {
+      const identity = await getSessionIdentity();
+      const [t, s] = await Promise.all([getTeamById(params.id), listStudents()]);
+      if (cancelled) return;
+      setMyId(identity.id);
+      setMyName(identity.fullName);
+      setTeam(t);
+      setStudents(s);
+      if (t && canAccessChat(t, identity.id)) {
+        setMessages(await getTeamMessages(t.id));
+        markChatAsRead(t.id);
+      }
+    })().catch(() => {
+      if (!cancelled) setFailed(true);
+    });
     return () => {
       cancelled = true;
     };
   }, [params.id]);
-
-  const namesById = React.useMemo(
-    () => new Map((students ?? []).map((s) => [s.id, s.fullName])),
-    [students]
-  );
-  const studentsById = React.useMemo(
-    () => new Map((students ?? []).map((s) => [s.id, s])),
-    [students]
-  );
 
   function scrollToBottom() {
     // Wait a tick so the new message paints before scrolling.
@@ -85,6 +82,30 @@ export default function TeamChatPage() {
       bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
     }, 50);
   }
+
+  // Realtime updates (Supabase mode only; mock mode uses local state).
+  const teamId = team?.id;
+  React.useEffect(() => {
+    if (!teamId || !isSupabaseConfigured()) return;
+    return subscribeToTeamMessages(teamId, (incoming) => {
+      setMessages((prev) => {
+        if (!prev) return prev;
+        if (prev.some((m) => m.id === incoming.id)) return prev;
+        return [...prev, incoming];
+      });
+      scrollToBottom();
+    });
+  }, [teamId]);
+
+  const namesById = React.useMemo(() => {
+    const map = new Map((students ?? []).map((s) => [s.id, s.fullName]));
+    if (!map.has(myId)) map.set(myId, myName);
+    return map;
+  }, [students, myId, myName]);
+  const studentsById = React.useMemo(
+    () => new Map((students ?? []).map((s) => [s.id, s])),
+    [students]
+  );
 
   React.useEffect(() => {
     if (messages && messages.length > 0 && !didInitialScroll.current) {
@@ -96,7 +117,7 @@ export default function TeamChatPage() {
   async function handleSend(content: string): Promise<boolean> {
     if (!team) return false;
     setSending(true);
-    const res = await sendMessage(team.id, CURRENT_USER, content);
+    const res = await sendMessage(team.id, myId, content);
     setSending(false);
     if (!res.ok) {
       error("Couldn't send the message", CHAT_ERROR_MESSAGES[res.error]);
@@ -110,7 +131,7 @@ export default function TeamChatPage() {
 
   async function handleDelete(messageId: string) {
     setDeletingId(messageId);
-    const res = await deleteMessage(messageId, CURRENT_USER);
+    const res = await deleteMessage(messageId, myId);
     setDeletingId(null);
     if (!res.ok) {
       error(
@@ -163,7 +184,7 @@ export default function TeamChatPage() {
     );
   }
 
-  if (!canAccessChat(team, CURRENT_USER)) {
+  if (!canAccessChat(team, myId)) {
     return <ChatAccessDenied teamTitle={team.projectTitle} />;
   }
 
@@ -180,7 +201,7 @@ export default function TeamChatPage() {
             ) : (
               <MessageList
                 messages={messages}
-                currentUserId={CURRENT_USER}
+                currentUserId={myId}
                 namesById={namesById}
                 onDelete={handleDelete}
                 deletingId={deletingId}
@@ -197,7 +218,7 @@ export default function TeamChatPage() {
             members={team.members}
             studentsById={studentsById}
             ownerId={team.ownerId}
-            currentUserId={CURRENT_USER}
+            currentUserId={myId}
           />
         </aside>
       </div>
@@ -217,7 +238,7 @@ export default function TeamChatPage() {
           members={team.members}
           studentsById={studentsById}
           ownerId={team.ownerId}
-          currentUserId={CURRENT_USER}
+          currentUserId={myId}
         />
       </Modal>
     </div>

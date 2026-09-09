@@ -2,17 +2,34 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Menu, Search } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/Button";
 import { NotificationBell } from "@/components/notifications/NotificationBadge";
 import { useUnreadCount } from "@/components/notifications/useNotificationCounts";
+import { getSessionIdentity } from "@/lib/services/session";
 import { mockCurrentStudent } from "@/lib/mock/students";
 
 export function Navbar({ onMenuClick }: { onMenuClick: () => void }) {
+  const router = useRouter();
   const [profileOpen, setProfileOpen] = React.useState(false);
+  const [displayName, setDisplayName] = React.useState(mockCurrentStudent.fullName);
+  const [displayMeta] = React.useState(
+    `${mockCurrentStudent.program} · Y${mockCurrentStudent.year}`
+  );
   const unread = useUnreadCount();
   const menuRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    getSessionIdentity().then((identity) => {
+      if (!cancelled && identity.id !== "me") setDisplayName(identity.fullName);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   React.useEffect(() => {
     const onClick = (e: MouseEvent) => {
@@ -58,13 +75,13 @@ export function Navbar({ onMenuClick }: { onMenuClick: () => void }) {
           aria-expanded={profileOpen}
           className="flex items-center gap-2.5 rounded-xl p-1.5 pr-2 transition-colors hover:bg-slate-100"
         >
-          <Avatar name={mockCurrentStudent.fullName} size="sm" />
+          <Avatar name={displayName} size="sm" />
           <span className="hidden text-left leading-tight sm:block">
             <span className="block max-w-[120px] truncate text-[13px] font-semibold text-slate-900">
-              {mockCurrentStudent.fullName}
+              {displayName}
             </span>
             <span className="block text-[11px] text-slate-500">
-              {mockCurrentStudent.program} · Y{mockCurrentStudent.year}
+              {displayMeta}
             </span>
           </span>
         </button>
@@ -89,13 +106,24 @@ export function Navbar({ onMenuClick }: { onMenuClick: () => void }) {
               </Link>
             ))}
             <div className="my-1.5 border-t border-slate-100" />
-            <Link
-              href="/login"
+            <button
               role="menuitem"
-              className="block px-4 py-2 text-sm text-rose-600 hover:bg-rose-50"
+              onClick={() => {
+                setProfileOpen(false);
+                void (async () => {
+                  const { isSupabaseConfigured } = await import("@/lib/supabase/config");
+                  if (isSupabaseConfigured()) {
+                    const { signOutAction } = await import("@/lib/actions/auth");
+                    await signOutAction();
+                    return; // action redirects to /login
+                  }
+                  router.push("/login");
+                })();
+              }}
+              className="block w-full px-4 py-2 text-left text-sm text-rose-600 hover:bg-rose-50"
             >
               Sign out
-            </Link>
+            </button>
           </div>
         )}
       </div>

@@ -11,6 +11,8 @@ import { TeamCard } from "@/components/teams/TeamCard";
 import { listMyTeams } from "@/lib/services/teams";
 import { listProjects, EMPTY_FILTERS } from "@/lib/services/projects";
 import { listStudents } from "@/lib/services/students";
+import { getSessionIdentity } from "@/lib/services/session";
+import { getUnreadMessageCountAsync } from "@/lib/services/chat";
 import type { Project, Student, Team } from "@/types";
 
 /** Teams dashboard — every team the current user belongs to. */
@@ -18,20 +20,31 @@ export default function TeamsPage() {
   const [teams, setTeams] = React.useState<Team[] | null>(null);
   const [projects, setProjects] = React.useState<Project[] | null>(null);
   const [students, setStudents] = React.useState<Student[] | null>(null);
+  const [unreadByTeam, setUnreadByTeam] = React.useState<Map<string, number>>(new Map());
+  const [myId, setMyId] = React.useState("me");
   const [failed, setFailed] = React.useState(false);
 
   React.useEffect(() => {
     let cancelled = false;
-    Promise.all([listMyTeams("me"), listProjects(EMPTY_FILTERS), listStudents()])
-      .then(([t, p, s]) => {
-        if (cancelled) return;
-        setTeams(t);
-        setProjects(p);
-        setStudents(s);
-      })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
-      });
+    (async () => {
+      const identity = await getSessionIdentity();
+      const [t, p, s] = await Promise.all([
+        listMyTeams(identity.id),
+        listProjects(EMPTY_FILTERS),
+        listStudents(),
+      ]);
+      if (cancelled) return;
+      setMyId(identity.id);
+      setTeams(t);
+      setProjects(p);
+      setStudents(s);
+      const counts = await Promise.all(
+        t.map(async (team) => [team.id, await getUnreadMessageCountAsync(team.id, identity.id)] as const)
+      );
+      if (!cancelled) setUnreadByTeam(new Map(counts));
+    })().catch(() => {
+      if (!cancelled) setFailed(true);
+    });
     return () => {
       cancelled = true;
     };
@@ -112,8 +125,9 @@ export default function TeamsPage() {
                 key={team.id}
                 team={team}
                 category={projectById.get(team.projectId)?.category ?? "Project"}
+                unread={unreadByTeam.get(team.id) ?? 0}
                 ownerName={
-                  team.ownerId === "me"
+                  team.ownerId === myId
                     ? "You"
                     : (studentById.get(team.ownerId)?.fullName ??
                       team.members.find((m) => m.studentId === team.ownerId)?.name ??

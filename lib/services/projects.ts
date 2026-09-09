@@ -5,20 +5,27 @@ import type {
   ProjectType,
 } from "@/types";
 import { mockProjects } from "@/lib/mock/projects";
+import { isSupabaseConfigured } from "@/lib/supabase/config";
+import { createClient } from "@/lib/supabase/client";
+import {
+  mapProject,
+  toDbStatus,
+  type DbProject,
+  type DbTeamMember,
+} from "@/lib/supabase/mappers";
+import {
+  createProjectAction,
+  deleteProjectAction,
+  setProjectStatusAction,
+  updateProjectAction,
+} from "@/lib/actions/projects";
 
 /**
- * Project service — single swap point for future Supabase persistence.
+ * Project service — single swap point for persistence.
  *
- * Stage 5 behaviour: reads the mock dataset plus session-created projects
- * (module memory + localStorage, guarded for SSR). UI pages must import
- * from here, never touch mock arrays or storage directly.
- *
- * TODO (Supabase):
- * - `listProjects` → `from("projects").select("*").order("created_at")`
- *   with `.ilike()` / `.overlaps()` / `.lte()` server-side filters.
- * - `getProject` → `from("projects").select("*, team_members(*)").eq("id", id).single()`
- * - `createProject` / `updateProject` → `insert` / `update` with RLS
- *   (creator owns the row). Match % moves server-side in Stage 6.
+ * Mock mode: mock dataset + session projects (module memory + localStorage).
+ * Supabase mode: reads via RLS (browser client); writes via Server Actions
+ * (server-side authZ). UI pages import from here either way.
  */
 
 export interface ProjectFilters {
@@ -174,6 +181,32 @@ export function getProject(id: string): Project | undefined {
   return allProjects().find((p) => p.id === id);
 }
 
+/** Supabase read path: projects + creator names + live member counts. */
+async function listProjectsDb(): Promise<Project[]> {
+  const supabase = createClient();
+  const [{ data: rows }, { data: profiles }, { data: teams }, { data: members }] =
+    await Promise.all([
+      supabase.from("projects").select("*").order("created_at", { ascending: false }),
+      supabase.from("profiles").select("id, full_name"),
+      supabase.from("teams").select("id, project_id"),
+      supabase.from("team_members").select("team_id"),
+    ]);
+  const names = new Map(
+    ((profiles ?? []) as { id: string; full_name: string | null }[]).map((p) => [p.id, p.full_name ?? "Unknown"])
+  );
+  const teamByProject = new Map(
+    ((teams ?? []) as { id: string; project_id: string }[]).map((t) => [t.id, t.project_id])
+  );
+  const counts = new Map<string, number>();
+  for (const m of ((members ?? []) as Pick<DbTeamMember, "team_id">[])) {
+    const pid = teamByProject.get(m.team_id);
+    if (pid) counts.set(pid, (counts.get(pid) ?? 0) + 1);
+  }
+  return ((rows ?? []) as DbProject[]).map((r) =>
+    mapProject(r, names.get(r.creator_id) ?? "Unknown", counts.get(r.id) ?? 0)
+  );
+}
+
 export function isProjectOwner(project: Project, userId = "me"): boolean {
   return project.creatorId === userId;
 }
@@ -241,12 +274,18 @@ export function filterProjects(projects: Project[], f: ProjectFilters): Project[
 }
 
 export async function listProjects(filters: ProjectFilters): Promise<Project[]> {
+  if (isSupabaseConfigured()) {
+    return filterProjects(await listProjectsDb(), filters);
+  }
   await new Promise((r) => setTimeout(r, 450));
   return filterProjects(allProjects(), filters);
 }
 
 /** Admin view: every project including archived/deleted-excluded session state. */
 export async function listAllProjects(): Promise<Project[]> {
+  if (isSupabaseConfigured()) {
+    return listProjectsDb();
+  }
   await new Promise((r) => setTimeout(r, 300));
   return [...allProjects()].sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
@@ -254,6 +293,10 @@ export async function listAllProjects(): Promise<Project[]> {
 }
 
 export async function getProjectById(id: string): Promise<Project | null> {
+  if (isSupabaseConfigured()) {
+    const all = await listProjectsDb();
+    return all.find((p) => p.id === id) ?? null;
+  }
   await new Promise((r) => setTimeout(r, 350));
   return getProject(id) ?? null;
 }
@@ -298,6 +341,21 @@ export async function createProject(
   values: ProjectFormValues,
   author: { id: string; name: string }
 ): Promise<Project> {
+  if (isSupabaseConfigured()) {
+    // Author identity is re-derived server-side; `author` is a display hint.
+    const res = await createProjectAction({
+      title: values.title,
+      description: values.description,
+      category: values.category,
+      maxTeamSize: Number(values.maxTeamSize),
+      requiredSkills: values.requiredSkills,
+      deadline: new Date(`${values.deadline}T23:59:59`).toISOString(),
+    });
+    if (!res.ok) throw new Error(res.error);
+    const created = await getProjectById(res.data.id);
+    if (!created) throw new Error("Project was created but couldn't be loaded.");
+    return created;
+  }
   await new Promise((r) => setTimeout(r, 700));
   const project: Project = {
     id: slugify(values.title),
@@ -327,6 +385,18 @@ export async function updateProject(
   id: string,
   values: ProjectFormValues
 ): Promise<Project | null> {
+  if (isSupabaseConfigured()) {
+    const res = await updateProjectAction(id, {
+      title: values.title,
+      description: values.description,
+      category: values.category,
+      maxTeamSize: Number(values.maxTeamSize),
+      requiredSkills: values.requiredSkills,
+      deadline: new Date(`${values.deadline}T23:59:59`).toISOString(),
+    });
+    if (!res.ok) throw new Error(res.error);
+    return getProjectById(id);
+  }
   await new Promise((r) => setTimeout(r, 700));
   const existing = getProject(id);
   if (!existing) return null;
@@ -370,6 +440,11 @@ export async function setProjectStatus(
   id: string,
   status: ProjectStatus
 ): Promise<Project | null> {
+  if (isSupabaseConfigured()) {
+    const res = await setProjectStatusAction(id, toDbStatus(status));
+    if (!res.ok) throw new Error(res.error);
+    return getProjectById(id);
+  }
   await new Promise((r) => setTimeout(r, 400));
   const existing = getProject(id);
   if (!existing) return null;
@@ -383,6 +458,11 @@ export async function setProjectStatus(
 }
 
 export async function deleteProject(id: string): Promise<boolean> {
+  if (isSupabaseConfigured()) {
+    const res = await deleteProjectAction(id);
+    if (!res.ok) throw new Error(res.error);
+    return true;
+  }
   await new Promise((r) => setTimeout(r, 400));
   if (!getProject(id)) return false;
   const overlay = readAdminOverlay();

@@ -18,20 +18,21 @@ import {
 import { listProjects, EMPTY_FILTERS } from "@/lib/services/projects";
 import { listStudents } from "@/lib/services/students";
 import { listTeams } from "@/lib/services/teams";
+import { getSessionIdentity } from "@/lib/services/session";
 import { cn } from "@/lib/utils";
-
-const CURRENT_USER = "me";
 
 type RequestView = EnrichedRequest & { dir: "received" | "sent" };
 
 function RequestSection({
   views,
+  viewerId,
   emptyTitle,
   emptyDescription,
   emptyAction,
   onChanged,
 }: {
   views: RequestView[];
+  viewerId: string;
   emptyTitle: string;
   emptyDescription: string;
   emptyAction: { label: string; href: string };
@@ -54,7 +55,7 @@ function RequestSection({
       {pending.length > 0 && (
         <div className="grid gap-4 md:grid-cols-2">
           {pending.map((v) => (
-            <RequestCard key={v.request.id} view={v} onChanged={onChanged} />
+            <RequestCard key={v.request.id} view={v} viewerId={viewerId} onChanged={onChanged} />
           ))}
         </div>
       )}
@@ -65,7 +66,7 @@ function RequestSection({
           </h2>
           <div className="mt-3 grid gap-4 md:grid-cols-2">
             {history.map((v) => (
-              <RequestCard key={v.request.id} view={v} onChanged={onChanged} />
+              <RequestCard key={v.request.id} view={v} viewerId={viewerId} onChanged={onChanged} />
             ))}
           </div>
         </section>
@@ -78,36 +79,38 @@ function RequestSection({
 export default function RequestsPage() {
   const [tab, setTab] = React.useState<"received" | "sent">("received");
   const [views, setViews] = React.useState<RequestView[] | null>(null);
+  const [myId, setMyId] = React.useState("me");
   const [failed, setFailed] = React.useState(false);
   const [nonce, setNonce] = React.useState(0);
 
   React.useEffect(() => {
     let cancelled = false;
-    Promise.all([
-      getReceivedRequests(CURRENT_USER),
-      getSentRequests(CURRENT_USER),
-      listStudents(),
-      listProjects(EMPTY_FILTERS),
-      listTeams(),
-    ])
-      .then(([received, sent, students, projects, teams]) => {
-        if (cancelled) return;
-        const tagged = [
-          ...received.map((r) => ({ r, dir: "received" as const })),
-          ...sent.map((r) => ({ r, dir: "sent" as const })),
-        ];
-        const enriched = enrichRequests(
-          tagged.map((t) => t.r),
-          students,
-          projects,
-          teams,
-          CURRENT_USER
-        ).map((v, i) => ({ ...v, dir: tagged[i]?.dir ?? ("received" as const) }));
-        setViews(enriched);
-      })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
-      });
+    (async () => {
+      const identity = await getSessionIdentity();
+      const [received, sent, students, projects, teams] = await Promise.all([
+        getReceivedRequests(identity.id),
+        getSentRequests(identity.id),
+        listStudents(),
+        listProjects(EMPTY_FILTERS),
+        listTeams(),
+      ]);
+      if (cancelled) return;
+      setMyId(identity.id);
+      const tagged = [
+        ...received.map((r) => ({ r, dir: "received" as const })),
+        ...sent.map((r) => ({ r, dir: "sent" as const })),
+      ];
+      const enriched = enrichRequests(
+        tagged.map((t) => t.r),
+        students,
+        projects,
+        teams,
+        identity.id
+      ).map((v, i) => ({ ...v, dir: tagged[i]?.dir ?? ("received" as const) }));
+      setViews(enriched);
+    })().catch(() => {
+      if (!cancelled) setFailed(true);
+    });
     return () => {
       cancelled = true;
     };
@@ -170,6 +173,7 @@ export default function RequestsPage() {
         ) : tab === "received" ? (
           <RequestSection
             views={receivedViews}
+            viewerId={myId}
             emptyTitle="No pending invitations"
             emptyDescription="When someone invites you to join a project team, you'll see it here."
             emptyAction={{ label: "Find Projects", href: "/projects" }}
@@ -178,6 +182,7 @@ export default function RequestsPage() {
         ) : (
           <RequestSection
             views={sentViews}
+            viewerId={myId}
             emptyTitle="No invitations sent yet"
             emptyDescription="Find a suitable teammate and invite them to your project team."
             emptyAction={{ label: "Find Teammates", href: "/matches" }}

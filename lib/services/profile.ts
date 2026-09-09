@@ -1,18 +1,16 @@
 import type { StudentProfile } from "@/types";
 import { emptyProfileDraft, mockProfile } from "@/lib/mock/profile";
+import { isSupabaseConfigured } from "@/lib/supabase/config";
+import { createClient } from "@/lib/supabase/client";
+import { mapProfile, type DbProfile } from "@/lib/supabase/mappers";
+import { saveProfileAction } from "@/lib/actions/profile";
 
 /**
- * Profile service — single swap point for future Supabase persistence.
+ * Profile service — single swap point for persistence.
  *
- * Stage 3 behaviour: reads/writes a local draft (localStorage, guarded for
- * SSR) seeded from mock data. UI pages must import from here, never touch
- * storage directly.
- *
- * TODO (Supabase):
- * - `loadProfile(userId)` → `from("profiles").select("*").eq("id", userId).single()`
- * - `saveProfile(userId, draft)` → `from("profiles").upsert({ id: userId, ...draft })`
- * - Avatar upload → Supabase Storage bucket `avatars`, store public URL in
- *   `avatar_url`. The wizard's `previewAvatarUrl` stays client-side only.
+ * Mock mode: local draft (localStorage) seeded from mock data.
+ * Supabase mode: draft stays a harmless local scratchpad, but finish/save
+ * persists to `profiles` via Server Action and loading reads the DB row.
  */
 
 const DRAFT_KEY = "pm.profile.draft.v1";
@@ -67,6 +65,59 @@ export function clearDraft(): void {
 /** Seed the wizard from the mock profile (demo "continue where you left off"). */
 export function seedDraftFromMock(): StudentProfile {
   return { ...mockProfile, updatedAt: new Date().toISOString() };
+}
+
+/**
+ * Load the persisted profile (Supabase mode) mapped onto the setup draft
+ * shape. Returns null when there is nothing saved yet.
+ */
+export async function loadPersistedProfile(): Promise<StudentProfile | null> {
+  if (!isSupabaseConfigured()) return null;
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return null;
+  const { data, error } = await supabase.from("profiles").select("*").eq("id", user.id).single();
+  if (error || !data) return null;
+  const row = mapProfile(data as DbProfile);
+  const base = emptyProfileDraft();
+  return {
+    ...base,
+    id: row.id,
+    fullName: row.fullName,
+    bio: row.bio,
+    program: row.program,
+    year: row.year,
+    skills: row.skills.map((s) => ({ skill: s, level: "Intermediate" as const })),
+    interests: row.interests,
+    availability: row.availability,
+    experienceLevel: row.experienceLevel,
+    profileCompletion: row.profileCompletion,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Persist the finished draft. Supabase mode writes through the Server
+ * Action (whitelisted fields only); mock mode keeps localStorage behavior.
+ */
+export async function persistProfile(
+  draft: StudentProfile
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!isSupabaseConfigured()) return { ok: true };
+  const res = await saveProfileAction({
+    fullName: draft.fullName,
+    bio: draft.bio,
+    university: draft.university,
+    program: draft.program,
+    year: draft.year,
+    skills: draft.skills.map((s) => s.skill),
+    interests: draft.interests,
+    availability: draft.availability,
+    experienceLevel: draft.experienceLevel,
+  });
+  return res.ok ? { ok: true } : { ok: false, error: res.error };
 }
 
 export type ProfileErrors = Partial<Record<string, string>>;

@@ -21,6 +21,7 @@ import { TeamActivity } from "@/components/teams/TeamActivity";
 import { TeamActions } from "@/components/teams/TeamActions";
 import { TeamManagement } from "@/components/teams/TeamManagement";
 import { analyzeTeam } from "@/lib/matching/teamBalancer";
+import { getSessionIdentity } from "@/lib/services/session";
 import {
   canLeaveTeam,
   canManageMembers,
@@ -48,8 +49,6 @@ import {
   type TeamMember,
 } from "@/types";
 
-const CURRENT_USER = "me";
-
 /**
  * Team workspace: project + members + skills + progress + activity.
  * Mutations run through lib/services/teams.ts (session state, mock).
@@ -69,22 +68,24 @@ export default function TeamDetailsPage() {
   const [leaveOpen, setLeaveOpen] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [statusBusy, setStatusBusy] = React.useState(false);
+  const [myId, setMyId] = React.useState("me");
 
   React.useEffect(() => {
     let cancelled = false;
-    Promise.all([getTeamById(params.id), listStudents()])
-      .then(async ([t, s]) => {
-        if (cancelled) return;
-        setTeam(t);
-        setStudents(s);
-        if (t) {
-          setActivity(await getTeamActivity(t.id));
-          setProject(await getProjectById(t.projectId));
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setTeam(null);
-      });
+    (async () => {
+      const identity = await getSessionIdentity();
+      const [t, s] = await Promise.all([getTeamById(params.id), listStudents()]);
+      if (cancelled) return;
+      setMyId(identity.id);
+      setTeam(t);
+      setStudents(s);
+      if (t) {
+        setActivity(await getTeamActivity(t.id));
+        setProject(await getProjectById(t.projectId));
+      }
+    })().catch(() => {
+      if (!cancelled) setTeam(null);
+    });
     return () => {
       cancelled = true;
     };
@@ -132,7 +133,7 @@ export default function TeamDetailsPage() {
   async function handleRoleSave() {
     if (!roleTarget || !roleValue) return;
     setBusy(true);
-    const res = await updateMemberRole(team!.id, roleTarget.studentId, roleValue, CURRENT_USER);
+    const res = await updateMemberRole(team!.id, roleTarget.studentId, roleValue, myId);
     setBusy(false);
     if (!res.ok) {
       error("Couldn't update the role", "You don't have permission to manage members.");
@@ -147,7 +148,7 @@ export default function TeamDetailsPage() {
   async function handleRemoveConfirm() {
     if (!removeTarget) return;
     setBusy(true);
-    const res = await removeMember(team!.id, removeTarget.studentId, CURRENT_USER);
+    const res = await removeMember(team!.id, removeTarget.studentId, myId);
     setBusy(false);
     if (!res.ok) {
       error("Couldn't remove the member", "Please try again.");
@@ -161,7 +162,7 @@ export default function TeamDetailsPage() {
 
   async function handleLeaveConfirm() {
     setBusy(true);
-    const res = await leaveTeam(team!.id, CURRENT_USER);
+    const res = await leaveTeam(team!.id, myId);
     setBusy(false);
     if (!res.ok) {
       error(
@@ -180,7 +181,7 @@ export default function TeamDetailsPage() {
   async function handleStatusChange(status: ProjectStatus) {
     if (!team || status === team.status) return;
     setStatusBusy(true);
-    const res = await updateTeamStatus(team.id, status, CURRENT_USER);
+    const res = await updateTeamStatus(team.id, status, myId);
     setStatusBusy(false);
     if (!res.ok) {
       error("Couldn't update the status", "Please try again.");
@@ -226,9 +227,9 @@ export default function TeamDetailsPage() {
     );
   }
 
-  const owner = isTeamOwner(team, CURRENT_USER);
-  const canManage = canManageMembers(team, CURRENT_USER);
-  const canLeave = canLeaveTeam(team, CURRENT_USER);
+  const owner = isTeamOwner(team, myId);
+  const canManage = canManageMembers(team, myId);
+  const canLeave = canLeaveTeam(team, myId);
 
   return (
     <div>
@@ -299,7 +300,7 @@ export default function TeamDetailsPage() {
               <TeamMemberList
                 members={team.members.map((m) => enrichMember(m, studentsById))}
                 levelsByStudent={levelsByStudent}
-                selfId={CURRENT_USER}
+                selfId={myId}
                 ownerId={team.ownerId}
                 canManage={canManage}
                 onChangeRole={(m) => {

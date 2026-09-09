@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Eye, EyeOff, Lock, Mail } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -9,6 +10,7 @@ import { useToast } from "@/components/ui/Toast";
 import { mockSignIn, validateEmail, validatePassword } from "@/lib/services/auth";
 
 export function LoginForm() {
+  const router = useRouter();
   const { success, error } = useToast();
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
@@ -33,14 +35,28 @@ export function LoginForm() {
     setFormError(null);
     setLoading(true);
     try {
-      const result = await mockSignIn(email, password);
-      if (result.ok) {
-        setSucceeded(true);
-        success("Signed in", result.message);
-      } else {
-        setFormError(result.message);
-        error("Sign-in failed", result.message);
+      // Supabase mode: real session + role-based landing. Mock mode: demo flow.
+      const { signInAction } = await import("@/lib/actions/auth");
+      const real = await signInAction(email, password);
+      if (!real.ok && real.error.includes("not configured")) {
+        const result = await mockSignIn(email, password);
+        if (result.ok) {
+          setSucceeded(true);
+          success("Signed in", result.message);
+        } else {
+          setFormError(result.message);
+          error("Sign-in failed", result.message);
+        }
+        return;
       }
+      if (real.ok) {
+        success("Signed in", "Welcome back!");
+        router.push(real.role === "admin" ? "/admin" : "/dashboard");
+        router.refresh();
+        return;
+      }
+      setFormError(real.error);
+      error("Sign-in failed", real.error);
     } finally {
       setLoading(false);
     }

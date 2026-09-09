@@ -1,12 +1,22 @@
 "use client";
 
-import { getUnreadMessageCount } from "@/lib/services/chat";
+import * as React from "react";
+import { getUnreadMessageCount, getUnreadMessageCountAsync } from "@/lib/services/chat";
+import { isSupabaseConfigured } from "@/lib/supabase/config";
 
-/**
- * Demo-user unread count for a team's chat.
- * Computed synchronously from the session store; remounts and parent
- * re-renders refresh it (matching the mock-mode reactivity model).
- */
+/** Demo-user unread count for a team's chat (remount refreshes). */
 export function useChatUnread(teamId: string, userId = "me"): number {
-  return getUnreadMessageCount(teamId, userId);
+  const [count, setCount] = React.useState(() =>
+    isSupabaseConfigured() ? 0 : getUnreadMessageCount(teamId, userId)
+  );
+  React.useEffect(() => {
+    let cancelled = false;
+    getUnreadMessageCountAsync(teamId, userId).then((c) => {
+      if (!cancelled) setCount(c);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [teamId, userId]);
+  return count;
 }

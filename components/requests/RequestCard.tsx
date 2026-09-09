@@ -17,7 +17,7 @@ import {
 } from "@/lib/services/requests";
 import { timeAgo } from "@/lib/utils";
 
-const CURRENT_USER = "me";
+const FALLBACK_VIEWER = "me";
 
 function ConfirmModal({
   title,
@@ -69,9 +69,11 @@ function ConfirmModal({
  */
 export function RequestActions({
   view,
+  viewerId = FALLBACK_VIEWER,
   onChanged,
 }: {
   view: EnrichedRequest;
+  viewerId?: string;
   onChanged: () => void;
 }) {
   const { success, error } = useToast();
@@ -79,18 +81,18 @@ export function RequestActions({
   const [busy, setBusy] = React.useState(false);
   const { request } = view;
 
-  const isRecipient = request.recipientId === CURRENT_USER;
-  const isSender = request.senderId === CURRENT_USER;
+  const isRecipient = request.recipientId === viewerId;
+  const isSender = request.senderId === viewerId;
   if (request.status !== "pending") return null;
 
   async function run(action: "accept" | "reject" | "cancel") {
     setBusy(true);
     const res =
       action === "accept"
-        ? await acceptRequest(request.id, CURRENT_USER)
+        ? await acceptRequest(request.id, viewerId)
         : action === "reject"
-          ? await rejectRequest(request.id, CURRENT_USER)
-          : await cancelRequest(request.id, CURRENT_USER);
+          ? await rejectRequest(request.id, viewerId)
+          : await cancelRequest(request.id, viewerId);
     setBusy(false);
     setConfirm(null);
     if (!res.ok) {
@@ -143,13 +145,15 @@ export function RequestActions({
 
 export function RequestCard({
   view,
+  viewerId = FALLBACK_VIEWER,
   onChanged,
 }: {
   view: EnrichedRequest;
+  viewerId?: string;
   onChanged: () => void;
 }) {
   const { request, counterpart, projectTitle, teamCount } = view;
-  const incoming = request.recipientId === CURRENT_USER;
+  const incoming = request.recipientId === viewerId;
 
   return (
     <Card>
@@ -198,7 +202,7 @@ export function RequestCard({
         </p>
 
         <div className="mt-3">
-          <RequestActions view={view} onChanged={onChanged} />
+          <RequestActions view={view} viewerId={viewerId} onChanged={onChanged} />
         </div>
 
         {request.status === "accepted" && (

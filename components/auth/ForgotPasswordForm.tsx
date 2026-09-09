@@ -22,11 +22,22 @@ export function ForgotPasswordForm() {
     if (validationError) return;
     setLoading(true);
     try {
-      const result = await mockRequestPasswordReset(email);
-      if (result.ok) {
-        setSent(true);
-        success("Request received", result.message);
+      const { sendResetAction } = await import("@/lib/actions/auth");
+      const real = await sendResetAction(email);
+      if (!real.ok && real.error.includes("not configured")) {
+        const result = await mockRequestPasswordReset(email);
+        if (result.ok) {
+          setSent(true);
+          success("Request received", result.message);
+        }
+        return;
       }
+      if (real.ok) {
+        setSent(true);
+        success("Request received", "If an account exists, a reset link is on its way.");
+        return;
+      }
+      setFieldError(real.error);
     } finally {
       setLoading(false);
     }
