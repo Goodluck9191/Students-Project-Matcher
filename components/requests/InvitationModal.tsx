@@ -22,6 +22,9 @@ export function InvitationModal({
   open,
   student,
   team,
+  teamChoices,
+  teamId,
+  onTeamChange,
   gapSkills,
   match,
   onClose,
@@ -30,6 +33,10 @@ export function InvitationModal({
   open: boolean;
   student: Student | null;
   team: Team | null;
+  /** Optional extra teams to choose from (dashboard invite). `team` stays the effective one. */
+  teamChoices?: Team[];
+  teamId?: string;
+  onTeamChange?: (id: string) => void;
   gapSkills: string[];
   match?: number;
   onClose: () => void;
@@ -46,6 +53,7 @@ export function InvitationModal({
 
   if (!student || !team) return null;
   const full = isTeamFull(team);
+  const showPicker = (teamChoices ?? []).length > 1 && onTeamChange;
 
   async function handleSend() {
     setBusy(true);
@@ -84,6 +92,25 @@ export function InvitationModal({
         </>
       }
     >
+      {showPicker && (
+        <div className="mb-3">
+          <label htmlFor="invite-team" className="mb-1.5 block text-sm font-medium text-slate-700">
+            Team
+          </label>
+          <select
+            id="invite-team"
+            value={teamId}
+            onChange={(e) => onTeamChange?.(e.target.value)}
+            className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"
+          >
+            {(teamChoices ?? []).map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.projectTitle} ({t.members.length}/{t.maxMembers})
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       <dl className="rounded-xl bg-slate-50 px-4 py-3 text-sm ring-1 ring-inset ring-slate-100">
         <div className="flex justify-between gap-2">
           <dt className="text-slate-500">Team</dt>

@@ -26,6 +26,10 @@ npm run test:requests   # request/notification tests
 npm run test:chat       # chat service tests
 npm run test:admin      # admin service tests
 npm run test:supabase   # config/mappers/migration-guarantee tests
+npm run test:dashboard   # completion formula, activity feed, profile resolution
+npm run test:live       # live RLS matrix against .env.local project (anon
+                        # isolation always; full 2-user matrix needs
+                        # SUPABASE_SERVICE_ROLE_KEY for provisioning/cleanup)
 ```
 
 ## Supabase backend (Stage 11)

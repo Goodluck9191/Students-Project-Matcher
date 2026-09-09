@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/Card";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState } from "@/components/ui/States";
+import { isSupabaseConfigured } from "@/lib/supabase/config";
 
 export function AdminReportCard({
   title,
@@ -63,12 +64,15 @@ export function AdminAccessDenied() {
         actionLabel="Back to Dashboard"
         actionHref="/dashboard"
       />
-      <p className="mt-4 text-center text-xs text-slate-400">
-        Demo only:{" "}
-        <Link href="/admin?preview=admin" className="font-medium text-brand-700 hover:underline">
-          Preview as admin
-        </Link>
-      </p>
+      {/* Mock-mode-only escape hatch: hidden whenever Supabase is configured. */}
+      {!isSupabaseConfigured() && (
+        <p className="mt-4 text-center text-xs text-slate-400">
+          Demo only:{" "}
+          <Link href="/admin?preview=admin" className="font-medium text-brand-700 hover:underline">
+            Preview as admin
+          </Link>
+        </p>
+      )}
     </div>
   );
 }

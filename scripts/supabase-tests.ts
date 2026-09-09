@@ -10,9 +10,12 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { isSupabaseConfigured, NOT_CONFIGURED_ERROR } from "../lib/supabase/config";
+import { isPublicPath } from "../lib/supabase/session";
+import { transferOwnership, leaveTeam } from "../lib/services/teams";
 import {
   mapNotification,
   mapProfile,
+  mapProfileExtra,
   mapProject,
   mapTeamMessage,
   mapTeamRequest,
@@ -60,7 +63,10 @@ const ROOT = process.cwd();
     academic_program: "Computer Science", year: 2, bio: "hi",
     experience_level: "Advanced", skills: ["React"], interests: ["AI"],
     availability: ["Evening"], role: "admin", is_active: true,
-    profile_completed: true, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
+    profile_completed: true, university: null, department: null,
+    graduation_year: null, previous_experience: null, available_days: [],
+    day_times: [], work_style: null, skill_levels: [],
+    created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
   });
   check("Mapper — profile", profile.fullName === "Test User" && profile.role === "admin" && profile.isActive && profile.profileCompletion === 100);
 
@@ -86,6 +92,44 @@ const ROOT = process.cwd();
     id: "m1", team_id: "t1", sender_id: null, content: "Joined.", message_type: "system", created_at: "2026-01-01T00:00:00Z",
   });
   check("Mapper — system message", msg.type === "system" && msg.senderId === null);
+
+  const extra = mapProfileExtra({
+    id: "u1", full_name: "T", email: null, avatar_url: null, academic_program: null,
+    year: null, bio: null, experience_level: null, skills: [], interests: [],
+    availability: [], role: "student", is_active: true, profile_completed: false,
+    university: "MUST", department: "CSE", graduation_year: "2028",
+    previous_experience: "Built X.", available_days: ["Monday"], day_times: ["Evening"],
+    work_style: "Hybrid", skill_levels: "not-an-array",
+    created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
+  });
+  check("Mapper — extra fields tolerate garbage", extra.skillLevels.length === 0 && extra.university === "MUST");
+  const extra2 = mapProfileExtra({
+    id: "u1", full_name: "T", email: null, avatar_url: null, academic_program: null,
+    year: null, bio: null, experience_level: null, skills: [], interests: [],
+    availability: [], role: "student", is_active: true, profile_completed: false,
+    university: "MUST", department: "CSE", graduation_year: "2028",
+    previous_experience: "Built X.", available_days: ["Monday"], day_times: ["Evening"],
+    work_style: "Hybrid",
+    skill_levels: [
+      { skill: "React", level: "Advanced" },
+      { skill: "Nope", level: "Guru" },
+      "junk",
+    ],
+    created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
+  });
+  check(
+    "Mapper — profile extra fields",
+    extra2.university === "MUST" &&
+      extra2.department === "CSE" &&
+      extra2.availableDays.join() === "Monday" &&
+      extra2.workStyle === "Hybrid"
+  );
+  check(
+    "Mapper — skill levels validated",
+    extra2.skillLevels.length === 1 &&
+      extra2.skillLevels[0].skill === "React" &&
+      extra2.skillLevels[0].level === "Advanced"
+  );
 }
 
 // Matching model preserved (§31)
@@ -109,7 +153,7 @@ const ROOT = process.cwd();
 {
   const dir = join(ROOT, "supabase", "migrations");
   const files = existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith(".sql")) : [];
-  check("Migrations — 9 files present", files.length === 9, `${files.length}`);
+  check("Migrations — 15 files present", files.length === 15, `${files.length}`);
   const all = files.map((f) => readFileSync(join(dir, f), "utf8")).join("\n");
   const tables = ["profiles", "projects", "teams", "team_members", "team_requests", "notifications", "team_messages", "platform_settings"];
   check("Migrations — all tables created", tables.every((t) => all.includes(`create table if not exists public.${t}`)));
@@ -123,7 +167,67 @@ const ROOT = process.cwd();
   check("Migrations — member-only chat read", all.includes("messages_member_read"));
   check("Migrations — no admin blanket chat read", !all.includes("team_messages") || !/create policy \w+ on public\.team_messages[\s\S]{0,200}is_admin\(\)/.test(all));
   check("Migrations — role check constraint", all.includes("check (role in ('student', 'admin'))"));
+  check("Migrations — self-insert policy", all.includes("profiles_self_insert") && all.includes("id = auth.uid()"));
+  check(
+    "Migrations — role/is_active immutable to self",
+    all.includes("profiles_self_update") && all.includes("and role = (select role from public.profiles where id = auth.uid())")
+  );
   check("Migrations — self-invite check", all.includes("sender_id <> recipient_id"));
+  check("Migrations — extra profile columns", ["university", "available_days", "day_times", "work_style", "skill_levels"].every((c) => all.includes(c)));
+  check(
+    "Migrations — avatars bucket locked to own folder",
+    all.includes("create policy avatars_own_insert") && all.includes("(storage.foldername(name))[1] = auth.uid()::text")
+  );
+  check("Migrations — owner member-update policy", all.includes("members_owner_update"));
+  check("Migrations — one team per project", all.includes("teams_project_unique"));
+  check("Migrations — ensure team RPC", all.includes("create or replace function public.ensure_project_team"));
+  check(
+    "Proxy — public vs protected paths",
+    isPublicPath("/") &&
+      isPublicPath("/login") &&
+      isPublicPath("/auth/confirm") &&
+      !isPublicPath("/dashboard") &&
+      !isPublicPath("/admin/users") &&
+      !isPublicPath("/teams/team-asset/chat")
+  );
+
+  // Ownership transfer (mock store): owner → member → old owner can leave.
+  const transfer = await transferOwnership("team-asset", "john-michael", "me");
+  check("Transfer — owner hands over", transfer.ok && transfer.team.ownerId === "john-michael");
+  const nonOwner = await transferOwnership("team-asset", "priya-nair", "priya-nair");
+  check("Transfer — non-owner blocked", !nonOwner.ok && nonOwner.error === "NOT_OWNER");
+  const stranger = await transferOwnership("team-asset", "david-kim", "john-michael");
+  check("Transfer — non-member target blocked", !stranger.ok && stranger.error === "MEMBER_NOT_FOUND");
+  const restored = await transferOwnership("team-asset", "me", "john-michael");
+  check("Transfer — ownership restored", restored.ok && restored.team.ownerId === "me");
+  const handBack = await transferOwnership("team-asset", "john-michael", "me");
+  const departed = await leaveTeam("team-asset", "me");
+  check("Transfer — old owner can now leave", handBack.ok && departed.ok);
+
+  // saveProfileAction must never write role/is_active (static whitelist check).
+  const actionSrc = readFileSync(join(ROOT, "lib", "actions", "profile.ts"), "utf8");
+  const payload = actionSrc.slice(actionSrc.indexOf(".upsert("));
+  check("Action — id is session-derived", payload.includes("id: check.profile.id"));
+  check("Action — no role/is_active write", !/^\s*(role|is_active)\s*:/m.test(payload));
+  check("Action — blob avatar URLs rejected", actionSrc.includes("startsWith(\"https://\")"));
+
+  const serviceSrc = readFileSync(join(ROOT, "lib", "services", "profile.ts"), "utf8");
+  check("Service — loads by session user id", serviceSrc.includes("supabase.auth.getUser()") && serviceSrc.includes(".eq(\"id\", user.id)"));
+
+  // Realtime regression: supabase-js reuses cached channels by topic, and
+  // .on() after subscribe() throws on remount — every subscribe helper
+  // must use a unique channel name per call.
+  for (const [file, topic] of [
+    ["lib/services/notifications.ts", "notifications:"],
+    ["lib/services/requests.ts", "requests:"],
+    ["lib/services/chat.ts", "team-chat:"],
+  ] as const) {
+    const src = readFileSync(join(ROOT, ...file.split("/")), "utf8");
+    check(
+      `Realtime — unique channel per subscribe (${topic})`,
+      src.includes(`.channel(\`${topic}\${`) && /\+\+\w*[Ss]eq/.test(src)
+    );
+  }
 
   const seed = existsSync(join(ROOT, "supabase", "seed.sql"))
     ? readFileSync(join(ROOT, "supabase", "seed.sql"), "utf8")

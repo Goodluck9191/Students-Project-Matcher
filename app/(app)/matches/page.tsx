@@ -24,10 +24,11 @@ import { MatchViewToggle, type MatchView } from "@/components/matching/MatchView
 import { calculateMatches, type MatchResult } from "@/lib/matching/matchCalculator";
 import { EMPTY_FILTERS, listProjects } from "@/lib/services/projects";
 import { listStudents } from "@/lib/services/students";
-import { listTeams } from "@/lib/services/teams";
+import { ensureTeamForProject, listTeams } from "@/lib/services/teams";
 import { getSessionIdentity } from "@/lib/services/session";
 import { listTeamPendingRequests } from "@/lib/services/requests";
 import { InvitationModal } from "@/components/requests/InvitationModal";
+import { useToast } from "@/components/ui/Toast";
 import { cn } from "@/lib/utils";
 import type { MatchRecommendation, Project, Student, Team } from "@/types";
 
@@ -123,6 +124,7 @@ function ListRow({
  * UI → services (projects/students/teams) → lib/matching/* (pure).
  */
 export default function MatchesPage() {
+  const { success: toastSuccess, error: toastError } = useToast();
   const [projects, setProjects] = React.useState<Project[] | null>(null);
   const [students, setStudents] = React.useState<Student[] | null>(null);
   const [teams, setTeams] = React.useState<Team[] | null>(null);
@@ -215,6 +217,39 @@ export default function MatchesPage() {
       return "pending";
     if (result?.teamFull) return "full";
     return "idle";
+  }
+
+  const [ensuringTeam, setEnsuringTeam] = React.useState(false);
+
+  /**
+   * Invite click: real projects created via the UI have no team row yet,
+   * which used to make the modal (and the button) silently do nothing.
+   * Set up the workspace on demand, then open the invite dialog.
+   */
+  async function handleInviteClick(rec: MatchRecommendation) {
+    if (selectedTeam) {
+      setInviteTarget(rec);
+      return;
+    }
+    if (!selectedId || ensuringTeam) return;
+    setEnsuringTeam(true);
+    try {
+      const res = await ensureTeamForProject(selectedId, myId);
+      if (!res.ok) {
+        toastError(
+          "Couldn't set up the team",
+          res.error === "NOT_OWNER"
+            ? "Only the project creator can invite teammates."
+            : "This project no longer exists."
+        );
+        return;
+      }
+      setTeams((prev) => (prev ? [res.team, ...prev.filter((t) => t.id !== res.team.id)] : [res.team]));
+      toastSuccess("Team workspace created", "You can now invite teammates.");
+      setInviteTarget(rec);
+    } finally {
+      setEnsuringTeam(false);
+    }
   }
 
   if (!projects || !students || !teams) {
@@ -370,7 +405,7 @@ export default function MatchesPage() {
                     key={rec.student.id}
                     rec={rec}
                     inviteState={inviteStateFor(rec)}
-                    onInvite={setInviteTarget}
+                    onInvite={handleInviteClick}
                   />
                 ))}
               </div>
@@ -381,7 +416,7 @@ export default function MatchesPage() {
                     key={rec.student.id}
                     rec={rec}
                     inviteState={inviteStateFor(rec)}
-                    onInvite={() => setInviteTarget(rec)}
+                    onInvite={() => handleInviteClick(rec)}
                   />
                 ))}
               </ul>

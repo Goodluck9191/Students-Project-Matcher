@@ -32,6 +32,7 @@ import {
   loadPersistedProfile,
   persistProfile,
   saveDraft,
+  uploadAvatar,
   validateStep,
   type ProfileErrors,
   type SetupStepId,
@@ -66,6 +67,9 @@ export default function ProfileSetupPage() {
   const [maxReached, setMaxReached] = React.useState(0);
   const [errors, setErrors] = React.useState<ProfileErrors>({});
   const [finished, setFinished] = React.useState(false);
+  const [saving, setSaving] = React.useState(false);
+  // Raw photo file pending upload (preview URL lives in draft.avatarUrl).
+  const [avatarFile, setAvatarFile] = React.useState<File | undefined>(undefined);
 
   function emptyInitial(): StudentProfile {
     // SSR-safe initial; real draft loads on mount.
@@ -98,7 +102,9 @@ export default function ProfileSetupPage() {
     (async () => {
       const saved = await loadPersistedProfile();
       if (cancelled) return;
-      setDraft(saved ?? loadDraft());
+      // Only a real saved row pre-fills the wizard; every other outcome
+      // ("mock" included) starts from the local draft — never mock data.
+      setDraft(saved.status === "ok" ? saved.profile : loadDraft());
       setHydrated(true);
     })();
     return () => {
@@ -164,17 +170,35 @@ export default function ProfileSetupPage() {
     const done = {
       ...draft,
       availability: deriveAvailabilitySlots(draft),
-      profileCompletion: 100,
+      profileCompletion: computeCompletion({ ...draft, availability: deriveAvailabilitySlots(draft) }),
       updatedAt: new Date().toISOString(),
     };
     setDraft(done);
     saveDraft(done);
-    const saved = await persistProfile(done);
-    if (!saved.ok) {
-      toastError("Couldn't save your profile", saved.error);
-      return;
+    setSaving(true);
+    try {
+      // Upload a newly picked photo first so the persisted avatar_url is a
+      // permanent public URL — blob: previews are never stored.
+      let finalDraft = done;
+      if (avatarFile) {
+        const uploaded = await uploadAvatar(avatarFile);
+        if (!uploaded.ok) {
+          toastError("Photo upload failed", uploaded.error);
+          return;
+        }
+        finalDraft = { ...done, avatarUrl: uploaded.url };
+        setDraft(finalDraft);
+      }
+      const saved = await persistProfile(finalDraft);
+      if (!saved.ok) {
+        toastError("Couldn't save your profile", saved.error);
+        return;
+      }
+    } finally {
+      setSaving(false);
     }
     clearDraft();
+    setAvatarFile(undefined);
     setFinished(true);
     success("Profile complete", "Your profile is ready for matching.");
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -235,7 +259,10 @@ export default function ProfileSetupPage() {
                 <AvatarUpload
                   name={draft.fullName}
                   previewUrl={draft.avatarUrl}
-                  onFileSelect={(_, url) => patch({ avatarUrl: url })}
+                  onFileSelect={(file, url) => {
+                    setAvatarFile(file);
+                    patch({ avatarUrl: url });
+                  }}
                 />
                 <Input
                   label="Full name"
@@ -420,7 +447,7 @@ export default function ProfileSetupPage() {
               <ArrowLeft className="h-4 w-4" /> Back
             </Button>
             {step.id === "review" ? (
-              <Button onClick={handleFinish} className="w-full sm:w-auto" size="lg">
+              <Button onClick={handleFinish} loading={saving} className="w-full sm:w-auto" size="lg">
                 <CheckCircle2 className="h-4 w-4" /> Complete Profile
               </Button>
             ) : (

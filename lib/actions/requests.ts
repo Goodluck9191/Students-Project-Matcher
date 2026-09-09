@@ -41,6 +41,15 @@ export async function sendInvitationAction(args: {
   if (!t) return fail("NOT_FOUND", "This team no longer exists.");
   if (t.owner_id !== check.profile.id) return fail("FORBIDDEN", "Only the team owner can invite.");
 
+  const { data: recipient } = await supabase
+    .from("profiles")
+    .select("id, is_active")
+    .eq("id", args.recipientId)
+    .single();
+  const r = recipient as { id: string; is_active: boolean | null } | null;
+  if (!r) return fail("NOT_FOUND", "This student could not be found.");
+  if (r.is_active === false) return fail("VALIDATION", "This student's account is inactive.");
+
   const { data: members } = await supabase.from("team_members").select("user_id").eq("team_id", t.id);
   const memberIds = ((members ?? []) as { user_id: string }[]).map((m) => m.user_id);
   if (memberIds.includes(args.recipientId)) return fail("CONFLICT", "This student is already a member.");
@@ -91,9 +100,24 @@ export async function sendJoinRequestAction(
   if (!check.ok) return fail(check.reason, "You must be signed in.");
 
   const supabase = await createClient();
-  const { data: team } = await supabase.from("teams").select("id, owner_id").eq("project_id", projectId).single();
+  // Ensure the workspace exists (projects predating teams have none).
+  // The RPC creates it owned by the project creator — never the caller.
+  const { data: teamId, error: ensureError } = await supabase.rpc(
+    "ensure_project_team",
+    { p_project_id: projectId }
+  );
+  if (ensureError || !teamId) {
+    if (ensureError?.message.includes("PROJECT_NOT_FOUND"))
+      return fail("NOT_FOUND", "This project no longer exists.");
+    return fail("DB_ERROR", "Couldn't set up the team workspace.");
+  }
+  const { data: team } = await supabase
+    .from("teams")
+    .select("id, owner_id")
+    .eq("id", teamId as string)
+    .single();
   const t = team as { id: string; owner_id: string } | null;
-  if (!t) return fail("NOT_FOUND", "This project has no team yet.");
+  if (!t) return fail("NOT_FOUND", "This project no longer exists.");
   const { data, error } = await supabase
     .from("team_requests")
     .insert({

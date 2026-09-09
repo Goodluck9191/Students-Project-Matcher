@@ -25,6 +25,8 @@ const NEXT_STUBS = {
     "export function useParams(){ throw new Error('next/navigation is unavailable outside Next.js'); }" +
     "export function usePathname(){ throw new Error('next/navigation is unavailable outside Next.js'); }" +
     "export function useSearchParams(){ throw new Error('next/navigation is unavailable outside Next.js'); }",
+  "next/server":
+    "export class NextResponse { static next(){ return {}; } static redirect(){ return {}; } static json(){ return {}; } }",
 };
 
 export async function resolve(specifier, context, next) {

@@ -10,6 +10,8 @@ import type {
 import { mockTeamActivity, mockTeams } from "@/lib/mock/teams";
 import { analyzeRequiredSkills, levelOf } from "@/lib/matching/skillMatcher";
 import { postSystemMessage } from "./chat";
+import { getProject } from "./projects";
+import { getStudentById } from "./students";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -22,8 +24,10 @@ import {
 } from "@/lib/supabase/mappers";
 import {
   disbandTeamAction,
+  ensureTeamAction,
   leaveTeamAction,
   removeMemberAction,
+  transferOwnershipAction,
   updateMemberRoleAction,
   updateTeamStatusAction,
 } from "@/lib/actions/teams";
@@ -180,6 +184,64 @@ export async function getTeamForProject(projectId: string): Promise<Team | undef
   return found ? clone(found) : undefined;
 }
 
+export type EnsureTeamError = "TEAM_NOT_FOUND" | "NOT_OWNER" | "FORBIDDEN" | "PROJECT_NOT_FOUND";
+
+/**
+ * Get-or-create the workspace team for a project so owners can invite.
+ * Mock mode builds the row in the session store; Supabase mode delegates
+ * to ensureTeamAction (creator-verified server-side).
+ */
+export async function ensureTeamForProject(
+  projectId: string,
+  actorId: string
+): Promise<{ ok: true; team: Team } | { ok: false; error: EnsureTeamError }> {
+  if (isSupabaseConfigured()) {
+    const res = await ensureTeamAction(projectId);
+    if (!res.ok) {
+      if (res.code === "FORBIDDEN") return { ok: false, error: "FORBIDDEN" };
+      if (res.code === "NOT_FOUND") return { ok: false, error: "PROJECT_NOT_FOUND" };
+      return { ok: false, error: "TEAM_NOT_FOUND" };
+    }
+    const team = await getTeamById(res.data.id);
+    if (!team) return { ok: false, error: "TEAM_NOT_FOUND" };
+    return { ok: true, team };
+  }
+  await delay(400);
+  const project = getProject(projectId);
+  if (!project) return { ok: false, error: "PROJECT_NOT_FOUND" };
+  if (project.creatorId !== actorId) return { ok: false, error: "NOT_OWNER" };
+  const existing = store().teams.find((t) => t.projectId === projectId);
+  if (existing) return { ok: true, team: clone(existing) };
+  const owner = await getStudentById(actorId);
+  const team: Team = {
+    id: `team-${projectId}`,
+    projectId: project.id,
+    projectTitle: project.title,
+    ownerId: actorId,
+    status: "Recruiting",
+    maxMembers: project.maxTeamSize,
+    members: [
+      {
+        studentId: actorId,
+        name: owner?.fullName ?? project.creatorName,
+        role: "Project Lead",
+        skills: (owner?.skills ?? []).slice(0, 3),
+        matchScore: project.matchPercentage ?? 80,
+        status: "active",
+      },
+    ],
+    skillsCovered: [],
+    progress: 0,
+    deadline: project.deadline,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  store().teams.unshift(team);
+  touch(team, "Team workspace created");
+  persist();
+  return { ok: true, team: clone(team) };
+}
+
 export async function getTeamActivity(teamId: string): Promise<TeamActivityItem[]> {
   if (isSupabaseConfigured()) {
     const supabase = createClient();
@@ -311,6 +373,35 @@ async function refreshTeam(teamId: string): Promise<Team> {
   const team = await getTeamById(teamId);
   if (!team) throw new Error("Team was updated but couldn't be reloaded.");
   return team;
+}
+
+/**
+ * Transfer team ownership to another member (atomic: new owner promoted,
+ * previous owner demoted to member, who may then leave).
+ * Only the current owner; target must already be a member.
+ */
+export async function transferOwnership(
+  teamId: string,
+  newOwnerId: string,
+  actorId: string
+): Promise<MutationResult> {
+  if (isSupabaseConfigured()) {
+    const res = await transferOwnershipAction(teamId, newOwnerId);
+    if (!res.ok) return { ok: false, error: res.code === "FORBIDDEN" ? "NOT_OWNER" : "TEAM_NOT_FOUND" };
+    return { ok: true, team: await refreshTeam(teamId) };
+  }
+  await delay(400);
+  const team = store().teams.find((t) => t.id === teamId);
+  if (!team) return { ok: false, error: "TEAM_NOT_FOUND" };
+  if (!isTeamOwner(team, actorId)) return { ok: false, error: "NOT_OWNER" };
+  const target = team.members.find((m) => m.studentId === newOwnerId);
+  if (!target) return { ok: false, error: "MEMBER_NOT_FOUND" };
+  if (target.studentId === team.ownerId) return { ok: true, team: clone(team) };
+  const previous = team.members.find((m) => m.studentId === team.ownerId);
+  team.ownerId = target.studentId;
+  if (previous) previous.role = "Member";
+  touch(team, `Ownership transferred to ${target.name}`);
+  return { ok: true, team: clone(team) };
 }
 
 export async function updateMemberRole(

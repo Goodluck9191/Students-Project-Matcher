@@ -18,13 +18,12 @@ import {
   TeamCapacity,
 } from "@/components/projects";
 import { getProjectById } from "@/lib/services/projects";
+import { getTeamForProject } from "@/lib/services/teams";
 import { getMatchTier, tierStyles } from "@/lib/matching/score";
-import { mockTeams } from "@/lib/mock/teams";
 import { formatDate } from "@/lib/utils";
-import type { Project } from "@/types";
+import type { Project, Team } from "@/types";
 
-function TeamPreview({ project }: { project: Project }) {
-  const team = mockTeams.find((t) => t.projectId === project.id);
+function TeamPreview({ project, team }: { project: Project; team: Team | null }) {
   const members = team?.members ?? [
     {
       studentId: project.creatorId,
@@ -70,12 +69,16 @@ export default function ProjectDetailsPage() {
   const params = useParams<{ id: string }>();
   const { info } = useToast();
   const [project, setProject] = React.useState<Project | null | undefined>(undefined);
+  const [team, setTeam] = React.useState<Team | null>(null);
 
   React.useEffect(() => {
     let cancelled = false;
-    getProjectById(params.id).then((p) => {
-      if (!cancelled) setProject(p);
-    });
+    (async () => {
+      const p = await getProjectById(params.id);
+      if (cancelled) return;
+      setProject(p);
+      if (p) setTeam((await getTeamForProject(p.id)) ?? null);
+    })();
     return () => {
       cancelled = true;
     };
@@ -208,7 +211,7 @@ export default function ProjectDetailsPage() {
             </CardContent>
           </Card>
 
-          <TeamPreview project={project} />
+          <TeamPreview project={project} team={team} />
         </div>
 
         <aside className="min-w-0 space-y-4 lg:sticky lg:top-20">

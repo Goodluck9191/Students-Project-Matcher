@@ -13,6 +13,7 @@ import {
   enrichRequests,
   getReceivedRequests,
   getSentRequests,
+  subscribeToRequests,
   type EnrichedRequest,
 } from "@/lib/services/requests";
 import { listProjects, EMPTY_FILTERS } from "@/lib/services/projects";
@@ -79,7 +80,7 @@ function RequestSection({
 export default function RequestsPage() {
   const [tab, setTab] = React.useState<"received" | "sent">("received");
   const [views, setViews] = React.useState<RequestView[] | null>(null);
-  const [myId, setMyId] = React.useState("me");
+  const [myId, setMyId] = React.useState<string | null>(null);
   const [failed, setFailed] = React.useState(false);
   const [nonce, setNonce] = React.useState(0);
 
@@ -115,6 +116,12 @@ export default function RequestsPage() {
       cancelled = true;
     };
   }, [nonce]);
+
+  // Realtime request changes reload the inbox (single subscription).
+  React.useEffect(() => {
+    if (!myId) return;
+    return subscribeToRequests(myId, () => setNonce((n) => n + 1));
+  }, [myId]);
 
   const receivedViews = (views ?? []).filter((v) => v.dir === "received");
   const sentViews = (views ?? []).filter((v) => v.dir === "sent");
@@ -173,7 +180,7 @@ export default function RequestsPage() {
         ) : tab === "received" ? (
           <RequestSection
             views={receivedViews}
-            viewerId={myId}
+            viewerId={myId ?? "me"}
             emptyTitle="No pending invitations"
             emptyDescription="When someone invites you to join a project team, you'll see it here."
             emptyAction={{ label: "Find Projects", href: "/projects" }}
@@ -182,7 +189,7 @@ export default function RequestsPage() {
         ) : (
           <RequestSection
             views={sentViews}
-            viewerId={myId}
+            viewerId={myId ?? "me"}
             emptyTitle="No invitations sent yet"
             emptyDescription="Find a suitable teammate and invite them to your project team."
             emptyAction={{ label: "Find Teammates", href: "/matches" }}

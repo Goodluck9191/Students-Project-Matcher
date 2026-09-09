@@ -134,6 +134,37 @@ export interface NewNotification {
   relatedId?: string;
 }
 
+/**
+ * Realtime inbox for one user (Supabase mode only). Caller refreshes on
+ * insert; cleanup unsubscribes. No-op in mock mode.
+ *
+ * NOTE: each call uses a unique channel name. supabase-js reuses cached
+ * channels by topic, and calling .on() on an already-subscribed channel
+ * throws — unique names make StrictMode remounts safe.
+ */
+let notificationChannelSeq = 0;
+
+export function subscribeToNotifications(
+  userId: string,
+  onInsert: (notification: AppNotification) => void
+): () => void {
+  if (!isSupabaseConfigured()) return () => {};
+  const supabase = createClient();
+  const channel = supabase
+    .channel(`notifications:${userId}:${++notificationChannelSeq}`)
+    .on(
+      "postgres_changes",
+      { event: "INSERT", schema: "public", table: "notifications", filter: `user_id=eq.${userId}` },
+      (payload) => {
+        onInsert(mapNotification(payload.new as DbNotification));
+      }
+    )
+    .subscribe();
+  return () => {
+    void supabase.removeChannel(channel);
+  };
+}
+
 export function createNotification(input: NewNotification): AppNotification {
   const item: AppNotification = {
     id: `notif-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e4)}`,

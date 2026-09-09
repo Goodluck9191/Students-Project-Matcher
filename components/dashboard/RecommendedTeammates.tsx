@@ -10,23 +10,51 @@ import { Card, CardContent } from "@/components/ui/Card";
 import { Progress } from "@/components/ui/Progress";
 import { EmptyState } from "@/components/ui/States";
 import { useToast } from "@/components/ui/Toast";
+import { InvitationModal } from "@/components/requests/InvitationModal";
 import { getMatchTier, tierStyles } from "@/lib/matching/score";
-import type { MatchRecommendation } from "@/types";
+import { listMyTeams } from "@/lib/services/teams";
+import { listTeamPendingRequests } from "@/lib/services/requests";
+import { getSessionIdentity } from "@/lib/services/session";
+import type { MatchRecommendation, Team } from "@/types";
 
 /**
  * Dashboard teammate card — explains WHY the student is recommended
- * (complementary coverage), not just a score. The full matching UI
- * (MatchCard / MatchScore / MatchingReason) lands in Stage 6.
+ * (complementary coverage), not just a score. Invite goes through the
+ * real invitation flow (service → Server Action → team_requests);
+ * the modal lets the owner pick which of their teams to invite to.
  */
-function TeammateCard({ rec }: { rec: MatchRecommendation }) {
-  const { success } = useToast();
-  const [invited, setInvited] = React.useState(false);
+function TeammateCard({
+  rec,
+  teams,
+  pendingIds,
+  sentIds,
+  onSent,
+}: {
+  rec: MatchRecommendation;
+  teams: Team[];
+  pendingIds: Set<string>;
+  sentIds: Set<string>;
+  onSent: (studentId: string) => void;
+}) {
+  const { error } = useToast();
+  const [modalOpen, setModalOpen] = React.useState(false);
+  const [selectedTeamId, setSelectedTeamId] = React.useState<string>("");
   const tier = tierStyles(getMatchTier(rec.score));
   const { student } = rec;
 
-  function handleInvite() {
-    setInvited(true);
-    success(`Invited ${student.fullName}`, "They'll see your request in demo mode.");
+  const pending = pendingIds.has(student.id) || sentIds.has(student.id);
+  const team = teams.find((t) => t.id === selectedTeamId) ?? teams[0] ?? null;
+
+  function handleInviteClick() {
+    if (teams.length === 0) {
+      error(
+        "No team to invite to",
+        "Create a project first — inviting needs one of your teams with open space."
+      );
+      return;
+    }
+    if (!selectedTeamId && teams[0]) setSelectedTeamId(teams[0].id);
+    setModalOpen(true);
   }
 
   return (
@@ -87,12 +115,14 @@ function TeammateCard({ rec }: { rec: MatchRecommendation }) {
           <Button
             size="sm"
             className="flex-1"
-            disabled={invited}
-            onClick={handleInvite}
+            variant={pending ? "secondary" : "primary"}
+            disabled={pending}
+            onClick={handleInviteClick}
+            aria-label={pending ? `Invitation pending for ${student.fullName}` : `Invite ${student.fullName}`}
           >
-            {invited ? (
+            {pending ? (
               <>
-                <Check className="h-3.5 w-3.5" /> Invited
+                <Check className="h-3.5 w-3.5" /> Invitation Pending
               </>
             ) : (
               <>
@@ -102,11 +132,52 @@ function TeammateCard({ rec }: { rec: MatchRecommendation }) {
           </Button>
         </div>
       </CardContent>
+
+      <InvitationModal
+        open={modalOpen}
+        student={student}
+        team={team}
+        teamChoices={teams.length > 1 ? teams : undefined}
+        teamId={team?.id}
+        onTeamChange={setSelectedTeamId}
+        gapSkills={rec.missingSkillsCovered}
+        match={rec.score}
+        onClose={() => setModalOpen(false)}
+        onSent={(id) => {
+          setModalOpen(false);
+          onSent(id);
+        }}
+      />
     </Card>
   );
 }
 
 export function RecommendedTeammates({ teammates }: { teammates: MatchRecommendation[] }) {
+  // Owner teams with open space + their pending invitees (real data, so
+  // pending state survives refresh instead of living in local state).
+  const [teams, setTeams] = React.useState<Team[]>([]);
+  const [pendingIds, setPendingIds] = React.useState<Set<string>>(new Set());
+  const [sentIds, setSentIds] = React.useState<Set<string>>(new Set());
+
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const identity = await getSessionIdentity();
+      const mine = await listMyTeams(identity.id);
+      const owned = mine.filter(
+        (t) => t.ownerId === identity.id && t.members.length < t.maxMembers
+      );
+      if (cancelled) return;
+      setTeams(owned);
+      const pending = await Promise.all(owned.map((t) => listTeamPendingRequests(t.id)));
+      if (cancelled) return;
+      setPendingIds(new Set(pending.flat().flatMap((r) => [r.senderId, r.recipientId])));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <section aria-labelledby="rec-teammates">
       <div className="flex items-end justify-between gap-3">
@@ -137,7 +208,14 @@ export function RecommendedTeammates({ teammates }: { teammates: MatchRecommenda
       ) : (
         <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {teammates.map((rec) => (
-            <TeammateCard key={rec.student.id} rec={rec} />
+            <TeammateCard
+              key={rec.student.id}
+              rec={rec}
+              teams={teams}
+              pendingIds={pendingIds}
+              sentIds={sentIds}
+              onSent={(id) => setSentIds((prev) => new Set(prev).add(id))}
+            />
           ))}
         </div>
       )}

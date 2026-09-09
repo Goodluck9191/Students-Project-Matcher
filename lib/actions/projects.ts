@@ -47,7 +47,35 @@ export async function createProjectAction(input: ProjectInput): Promise<ActionRe
     .select("id")
     .single();
   if (error || !data) return fail("DB_ERROR", "Couldn't create the project. Please try again.");
-  return done({ id: (data as { id: string }).id });
+  const projectId = (data as { id: string }).id;
+  // Best-effort workspace setup so invites/joins work immediately.
+  // On-demand ensure() in the request flows covers any failure here.
+  const { error: teamError } = await supabase
+    .from("teams")
+    .insert({
+      project_id: projectId,
+      owner_id: check.profile.id,
+      name: input.title.trim(),
+      status: "recruiting",
+      progress: 0,
+    });
+  if (!teamError) {
+    const { data: teamRow } = await supabase
+      .from("teams")
+      .select("id")
+      .eq("project_id", projectId)
+      .single();
+    const teamId = (teamRow as { id: string } | null)?.id;
+    if (teamId) {
+      await supabase.from("team_members").insert({
+        team_id: teamId,
+        user_id: check.profile.id,
+        team_role: "owner",
+        project_role: "Project Lead",
+      });
+    }
+  }
+  return done({ id: projectId });
 }
 
 export async function updateProjectAction(

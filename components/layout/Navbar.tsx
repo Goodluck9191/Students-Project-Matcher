@@ -9,22 +9,24 @@ import { Button } from "@/components/ui/Button";
 import { NotificationBell } from "@/components/notifications/NotificationBadge";
 import { useUnreadCount } from "@/components/notifications/useNotificationCounts";
 import { getSessionIdentity } from "@/lib/services/session";
+import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { mockCurrentStudent } from "@/lib/mock/students";
 
 export function Navbar({ onMenuClick }: { onMenuClick: () => void }) {
   const router = useRouter();
   const [profileOpen, setProfileOpen] = React.useState(false);
-  const [displayName, setDisplayName] = React.useState(mockCurrentStudent.fullName);
-  const [displayMeta] = React.useState(
-    `${mockCurrentStudent.program} · Y${mockCurrentStudent.year}`
-  );
+  // Null until the session identity resolves — never render another
+  // user's name (in Supabase mode the demo fixture must not flash).
+  const [displayName, setDisplayName] = React.useState<string | null>(null);
+  // Program/year subtitle is mock-mode-only; Supabase mode shows the name,
+  // which always resolves from the session (never another user's data).
   const unread = useUnreadCount();
   const menuRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
     let cancelled = false;
     getSessionIdentity().then((identity) => {
-      if (!cancelled && identity.id !== "me") setDisplayName(identity.fullName);
+      if (!cancelled) setDisplayName(identity.fullName);
     });
     return () => {
       cancelled = true;
@@ -75,14 +77,22 @@ export function Navbar({ onMenuClick }: { onMenuClick: () => void }) {
           aria-expanded={profileOpen}
           className="flex items-center gap-2.5 rounded-xl p-1.5 pr-2 transition-colors hover:bg-slate-100"
         >
-          <Avatar name={displayName} size="sm" />
+          <Avatar name={displayName ?? "…"} size="sm" />
           <span className="hidden text-left leading-tight sm:block">
-            <span className="block max-w-[120px] truncate text-[13px] font-semibold text-slate-900">
-              {displayName}
-            </span>
-            <span className="block text-[11px] text-slate-500">
-              {displayMeta}
-            </span>
+            {displayName === null ? (
+              <span className="block h-4 w-24 animate-pulse rounded bg-slate-200" aria-label="Loading user" />
+            ) : (
+              <>
+                <span className="block max-w-[120px] truncate text-[13px] font-semibold text-slate-900">
+                  {displayName}
+                </span>
+                {!isSupabaseConfigured() && (
+                  <span className="block text-[11px] text-slate-500">
+                    {mockCurrentStudent.program} · Y{mockCurrentStudent.year}
+                  </span>
+                )}
+              </>
+            )}
           </span>
         </button>
         {profileOpen && (

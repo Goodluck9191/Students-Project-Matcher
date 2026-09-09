@@ -9,6 +9,7 @@ import {
   allowedStatuses,
   canLeaveTeam,
   canManageMembers,
+  ensureTeamForProject,
   getTeamById,
   getTeamSkillGaps,
   isTeamFull,
@@ -22,6 +23,7 @@ import {
 } from "../lib/services/teams";
 import { mockStudents } from "../lib/mock/students";
 import { mockProjects } from "../lib/mock/projects";
+import { createProject } from "../lib/services/projects";
 import type { Student, Team } from "../types/index";
 
 let passed = 0;
@@ -145,6 +147,51 @@ function fakeTeam(over: Partial<Team> = {}): Team {
 
   const statusDenied = await updateTeamStatus("team-health", "Completed", "me");
   check("Mutation — member cannot change status", !statusDenied.ok && statusDenied.error === "NOT_OWNER");
+}
+
+// On-demand workspace creation (mock store)
+{
+  const created = await createProject(
+    {
+      title: "Ensure Team Test Project",
+      description: "A project created to verify on-demand team workspace creation works end to end.",
+      category: "Web Development",
+      projectType: "Coursework",
+      program: "Computer Science",
+      year: "2",
+      maxTeamSize: "4",
+      requiredSkills: ["React"],
+      interests: ["Web Development"],
+      deadline: "2027-06-01",
+    },
+    { id: "me", name: "Alex Morgan" }
+  );
+  const first = await ensureTeamForProject(created.id, "me");
+  check(
+    "Ensure — creates team for owned project",
+    first.ok && first.team.ownerId === "me" && first.team.members.length === 1 && first.team.maxMembers === 4
+  );
+  const second = await ensureTeamForProject(created.id, "me");
+  check("Ensure — idempotent on second call", second.ok && second.team.id === (first.ok ? first.team.id : ""));
+  const other = await createProject(
+    {
+      title: "Ensure Team Stranger Project",
+      description: "A second project so the non-creator guard is tested on a teamless project.",
+      category: "AI",
+      projectType: "Research",
+      program: "Computer Science",
+      year: "3",
+      maxTeamSize: "3",
+      requiredSkills: ["Python"],
+      interests: ["AI"],
+      deadline: "2027-06-01",
+    },
+    { id: "me", name: "Alex Morgan" }
+  );
+  const stranger = await ensureTeamForProject(other.id, "sarah-michael");
+  check("Ensure — non-creator blocked", !stranger.ok && stranger.error === "NOT_OWNER");
+  const ghost = await ensureTeamForProject("no-such-project", "me");
+  check("Ensure — unknown project blocked", !ghost.ok && ghost.error === "PROJECT_NOT_FOUND");
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

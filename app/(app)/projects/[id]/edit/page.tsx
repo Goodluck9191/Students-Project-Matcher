@@ -60,7 +60,7 @@ export default function EditProjectPage() {
         setMissing(true);
         return;
       }
-      success("Project updated", "Saved locally in demo mode.");
+      success("Project updated", "Your changes are saved.");
       router.push(`/projects/${params.id}`);
     } catch {
       error("Couldn't save changes", "Please try again.");
