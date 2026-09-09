@@ -22,17 +22,29 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const [role, setRole] = React.useState<UserRole | null>(null);
   const [mobileOpen, setMobileOpen] = React.useState(false);
 
-  /* eslint-disable react-hooks/set-state-in-effect -- mount-only session read:
-     the role lives in localStorage (unavailable during SSR), so it must be
-     read into state once after hydration. */
+  // Mount-only session read: storage/session are unavailable during SSR.
   React.useEffect(() => {
-    // Demo-only preview switch: /admin?preview=admin
-    if (window.location.search.includes("preview=admin")) {
-      setCurrentRole("admin");
-    }
-    setRole(getCurrentRole());
+    let cancelled = false;
+    (async () => {
+      // Supabase mode: role comes ONLY from the server session. The
+      // ?preview=admin switch is mock-mode-only and ignored here.
+      const { isSupabaseConfigured } = await import("@/lib/supabase/config");
+      if (isSupabaseConfigured()) {
+        const { getMyRoleAction } = await import("@/lib/actions/auth");
+        const role = await getMyRoleAction();
+        if (!cancelled) setRole(role ?? "student");
+        return;
+      }
+      // Mock mode: demo-only preview switch.
+      if (window.location.search.includes("preview=admin")) {
+        setCurrentRole("admin");
+      }
+      if (!cancelled) setRole(getCurrentRole());
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   if (role === null) {
     return (

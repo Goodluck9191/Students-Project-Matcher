@@ -10,18 +10,33 @@ import type {
 import { mockTeamActivity, mockTeams } from "@/lib/mock/teams";
 import { analyzeRequiredSkills, levelOf } from "@/lib/matching/skillMatcher";
 import { postSystemMessage } from "./chat";
+import { isSupabaseConfigured } from "@/lib/supabase/config";
+import { createClient } from "@/lib/supabase/client";
+import {
+  mapTeam,
+  mapTeamMember,
+  toDbStatus,
+  type DbProject,
+  type DbTeam,
+  type DbTeamMember,
+} from "@/lib/supabase/mappers";
+import {
+  disbandTeamAction,
+  leaveTeamAction,
+  removeMemberAction,
+  updateMemberRoleAction,
+  updateTeamStatusAction,
+} from "@/lib/actions/teams";
 
 /**
- * Team service — single swap point for future Supabase persistence.
+ * Team service — single swap point for persistence.
  *
- * Stage 7 behaviour: reads mock teams; mutations apply to a session-scoped
- * working copy (module memory + localStorage, both SSR-guarded) so the UI
- * demonstrates role changes, removals, departures, and status updates
- * without pretending anything is stored server-side.
+ * Mock mode: session-scoped working copy (module memory + localStorage).
+ * Supabase mode: reads via RLS; mutations via Server Actions (server-side
+ * ownership/capacity checks). Skill-gap math reuses Stage 6 — unchanged.
  *
- * TODO (Supabase): `teams` + `team_members` tables with RLS
- * (owner manages members; members read their teams).
- * Skill-gap math reuses Stage 6's skillMatcher — no second algorithm.
+ * Production authorization is enforced server-side + RLS, never by these
+ * client-callable helpers alone.
  */
 
 function isBrowser(): boolean {
@@ -95,34 +110,113 @@ async function delay(ms = 300): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+/** Supabase read path: teams + rosters + names + project context. */
+async function listTeamsDb(): Promise<Team[]> {
+  const supabase = createClient();
+  const [{ data: teams }, { data: members }, { data: profiles }, { data: projects }] =
+    await Promise.all([
+      supabase.from("teams").select("*").order("updated_at", { ascending: false }),
+      supabase.from("team_members").select("*"),
+      supabase.from("profiles").select("id, full_name, skills"),
+      supabase.from("projects").select("id, name, required_team_size, deadline"),
+    ]);
+  const names = new Map(
+    ((profiles ?? []) as { id: string; full_name: string | null }[]).map((p) => [p.id, p.full_name ?? "Unknown"])
+  );
+  const skillsByUser = new Map(
+    ((profiles ?? []) as { id: string; skills: unknown }[]).map((p) => [
+      p.id,
+      Array.isArray(p.skills) ? (p.skills as string[]) : [],
+    ])
+  );
+  const projectById = new Map(
+    ((projects ?? []) as Pick<DbProject, "id" | "name" | "required_team_size" | "deadline">[]).map((p) => [p.id, p])
+  );
+  const membersByTeam = new Map<string, TeamMember[]>();
+  for (const m of ((members ?? []) as DbTeamMember[])) {
+    const list = membersByTeam.get(m.team_id) ?? [];
+    const member = mapTeamMember(m, names.get(m.user_id) ?? "Unknown");
+    member.skills = skillsByUser.get(m.user_id) ?? [];
+    list.push(member);
+    membersByTeam.set(m.team_id, list);
+  }
+  return ((teams ?? []) as DbTeam[]).map((t) => {
+    const project = projectById.get(t.project_id);
+    const team = mapTeam(t, membersByTeam.get(t.id) ?? [], project?.name ?? "Project");
+    team.maxMembers = project?.required_team_size ?? 8;
+    team.deadline = project?.deadline ?? t.updated_at;
+    return team;
+  });
+}
+
 export async function listTeams(): Promise<Team[]> {
+  if (isSupabaseConfigured()) return listTeamsDb();
   await delay();
   return clone(store().teams);
 }
 
 export async function listMyTeams(userId: string): Promise<Team[]> {
+  if (isSupabaseConfigured()) {
+    return (await listTeamsDb()).filter((t) => t.members.some((m) => m.studentId === userId));
+  }
   await delay(250);
   return clone(store().teams.filter((t) => t.members.some((m) => m.studentId === userId)));
 }
 
 export async function getTeamById(id: string): Promise<Team | null> {
+  if (isSupabaseConfigured()) {
+    return (await listTeamsDb()).find((t) => t.id === id) ?? null;
+  }
   await delay(250);
   return clone(store().teams.find((t) => t.id === id) ?? null);
 }
 
 export async function getTeamForProject(projectId: string): Promise<Team | undefined> {
+  if (isSupabaseConfigured()) {
+    return (await listTeamsDb()).find((t) => t.projectId === projectId);
+  }
   await delay(200);
   const found = store().teams.find((t) => t.projectId === projectId);
   return found ? clone(found) : undefined;
 }
 
 export async function getTeamActivity(teamId: string): Promise<TeamActivityItem[]> {
+  if (isSupabaseConfigured()) {
+    const supabase = createClient();
+    const { data } = await supabase
+      .from("team_messages")
+      .select("id, content, created_at")
+      .eq("team_id", teamId)
+      .eq("message_type", "system")
+      .order("created_at", { ascending: false });
+    return ((data ?? []) as { id: string; content: string; createdAt?: string; created_at: string }[]).map((m) => ({
+      id: m.id,
+      teamId,
+      title: m.content,
+      createdAt: m.created_at,
+    }));
+  }
   await delay(200);
   return clone(store().activity.filter((a) => a.teamId === teamId));
 }
 
 /** Admin view: every team activity event, newest first. */
 export async function listAllTeamActivity(): Promise<TeamActivityItem[]> {
+  if (isSupabaseConfigured()) {
+    const supabase = createClient();
+    const { data } = await supabase
+      .from("team_messages")
+      .select("id, team_id, content, created_at")
+      .eq("message_type", "system")
+      .order("created_at", { ascending: false })
+      .limit(200);
+    return ((data ?? []) as { id: string; team_id: string; content: string; created_at: string }[]).map((m) => ({
+      id: m.id,
+      teamId: m.team_id,
+      title: m.content,
+      createdAt: m.created_at,
+    }));
+  }
   await delay(200);
   return clone([...store().activity].sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
@@ -211,12 +305,25 @@ export async function addTeamMember(
   return { ok: true, team: clone(team) };
 }
 
+type MutationResult = { ok: true; team: Team } | { ok: false; error: TeamMutationError };
+
+async function refreshTeam(teamId: string): Promise<Team> {
+  const team = await getTeamById(teamId);
+  if (!team) throw new Error("Team was updated but couldn't be reloaded.");
+  return team;
+}
+
 export async function updateMemberRole(
   teamId: string,
   studentId: string,
   role: string,
   actorId: string
-): Promise<{ ok: true; team: Team } | { ok: false; error: TeamMutationError }> {
+): Promise<MutationResult> {
+  if (isSupabaseConfigured()) {
+    const res = await updateMemberRoleAction(teamId, studentId, role);
+    if (!res.ok) return { ok: false, error: res.code === "FORBIDDEN" ? "NOT_OWNER" : "TEAM_NOT_FOUND" };
+    return { ok: true, team: await refreshTeam(teamId) };
+  }
   await delay(400);
   const team = store().teams.find((t) => t.id === teamId);
   if (!team) return { ok: false, error: "TEAM_NOT_FOUND" };
@@ -232,7 +339,12 @@ export async function removeMember(
   teamId: string,
   studentId: string,
   actorId: string
-): Promise<{ ok: true; team: Team } | { ok: false; error: TeamMutationError }> {
+): Promise<MutationResult> {
+  if (isSupabaseConfigured()) {
+    const res = await removeMemberAction(teamId, studentId);
+    if (!res.ok) return { ok: false, error: res.code === "FORBIDDEN" ? "NOT_OWNER" : "TEAM_NOT_FOUND" };
+    return { ok: true, team: await refreshTeam(teamId) };
+  }
   await delay(400);
   const team = store().teams.find((t) => t.id === teamId);
   if (!team) return { ok: false, error: "TEAM_NOT_FOUND" };
@@ -249,7 +361,12 @@ export async function removeMember(
 export async function leaveTeam(
   teamId: string,
   userId: string
-): Promise<{ ok: true; team: Team } | { ok: false; error: TeamMutationError }> {
+): Promise<MutationResult> {
+  if (isSupabaseConfigured()) {
+    const res = await leaveTeamAction(teamId);
+    if (!res.ok) return { ok: false, error: res.code === "FORBIDDEN" ? "OWNER_CANNOT_LEAVE" : "NOT_A_MEMBER" };
+    return { ok: true, team: await refreshTeam(teamId) };
+  }
   await delay(400);
   const team = store().teams.find((t) => t.id === teamId);
   if (!team) return { ok: false, error: "TEAM_NOT_FOUND" };
@@ -279,7 +396,12 @@ export async function updateTeamStatus(
   status: ProjectStatus,
   actorId: string,
   opts?: { asAdmin?: boolean }
-): Promise<{ ok: true; team: Team } | { ok: false; error: TeamMutationError }> {
+): Promise<MutationResult> {
+  if (isSupabaseConfigured()) {
+    const res = await updateTeamStatusAction(teamId, toDbStatus(status), opts?.asAdmin);
+    if (!res.ok) return { ok: false, error: res.code === "FORBIDDEN" ? "NOT_OWNER" : "TEAM_NOT_FOUND" };
+    return { ok: true, team: await refreshTeam(teamId) };
+  }
   await delay(400);
   const team = store().teams.find((t) => t.id === teamId);
   if (!team) return { ok: false, error: "TEAM_NOT_FOUND" };
@@ -297,6 +419,11 @@ export async function updateTeamStatus(
 export async function disbandTeam(
   teamId: string
 ): Promise<{ ok: true } | { ok: false; error: TeamMutationError }> {
+  if (isSupabaseConfigured()) {
+    const res = await disbandTeamAction(teamId);
+    if (!res.ok) return { ok: false, error: "TEAM_NOT_FOUND" };
+    return { ok: true };
+  }
   await delay(400);
   const idx = store().teams.findIndex((t) => t.id === teamId);
   if (idx < 0) return { ok: false, error: "TEAM_NOT_FOUND" };

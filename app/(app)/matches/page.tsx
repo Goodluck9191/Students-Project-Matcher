@@ -23,9 +23,10 @@ import { TeamSkillCoverage } from "@/components/matching/TeamSkillCoverage";
 import { MatchViewToggle, type MatchView } from "@/components/matching/MatchViewToggle";
 import { calculateMatches, type MatchResult } from "@/lib/matching/matchCalculator";
 import { EMPTY_FILTERS, listProjects } from "@/lib/services/projects";
-import { listStudents, getCurrentUserId } from "@/lib/services/students";
+import { listStudents } from "@/lib/services/students";
 import { listTeams } from "@/lib/services/teams";
-import { findPendingRequest } from "@/lib/services/requests";
+import { getSessionIdentity } from "@/lib/services/session";
+import { listTeamPendingRequests } from "@/lib/services/requests";
 import { InvitationModal } from "@/components/requests/InvitationModal";
 import { cn } from "@/lib/utils";
 import type { MatchRecommendation, Project, Student, Team } from "@/types";
@@ -132,25 +133,49 @@ export default function MatchesPage() {
   const [filtersOpen, setFiltersOpen] = React.useState(false);
   const [inviteTarget, setInviteTarget] = React.useState<MatchRecommendation | null>(null);
   const [justSent, setJustSent] = React.useState<Set<string>>(new Set());
+  const [myId, setMyId] = React.useState("me");
 
   React.useEffect(() => {
     let cancelled = false;
-    Promise.all([listProjects(EMPTY_FILTERS), listStudents(), listTeams()])
-      .then(([p, s, t]) => {
-        if (cancelled) return;
-        const mine = p.filter((proj) => proj.creatorId === "me");
-        setProjects(mine);
-        setStudents(s);
-        setTeams(t);
-        setSelectedId(mine[0]?.id ?? "");
-      })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
-      });
+    (async () => {
+      const identity = await getSessionIdentity();
+      const [p, s, t] = await Promise.all([listProjects(EMPTY_FILTERS), listStudents(), listTeams()]);
+      if (cancelled) return;
+      const mine = p.filter((proj) => proj.creatorId === identity.id);
+      setMyId(identity.id);
+      setProjects(mine);
+      setStudents(s);
+      setTeams(t);
+      setSelectedId(mine[0]?.id ?? "");
+    })().catch(() => {
+      if (!cancelled) setFailed(true);
+    });
     return () => {
       cancelled = true;
     };
   }, []);
+
+  // Pending invite states for the selected team (works in both modes).
+  const [pending, setPending] = React.useState<{ teamId: string; ids: Set<string> }>({
+    teamId: "",
+    ids: new Set(),
+  });
+  React.useEffect(() => {
+    if (!selectedId || !teams) return;
+    const team = teams.find((t) => t.projectId === selectedId);
+    if (!team) return;
+    let cancelled = false;
+    listTeamPendingRequests(team.id).then((reqs) => {
+      if (cancelled) return;
+      setPending({
+        teamId: team.id,
+        ids: new Set(reqs.flatMap((r) => [r.senderId, r.recipientId])),
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedId, teams, justSent]);
 
   const result: MatchResult | null = React.useMemo(() => {
     if (!projects || !students || !teams || !selectedId) return null;
@@ -161,11 +186,11 @@ export default function MatchesPage() {
         project,
         team: teams.find((t) => t.projectId === project.id),
         studentsById: new Map(students.map((s) => [s.id, s])),
-        currentUserId: getCurrentUserId(),
+        currentUserId: myId,
       },
       students
     );
-  }, [projects, students, teams, selectedId]);
+  }, [projects, students, teams, selectedId, myId]);
 
   const visible = React.useMemo(
     () => (result ? applyFilters(result.recommendations, filters) : []),
@@ -186,7 +211,8 @@ export default function MatchesPage() {
   function inviteStateFor(rec: MatchRecommendation): InviteState {
     if (memberIds.has(rec.student.id)) return "member";
     if (justSent.has(rec.student.id)) return "pending";
-    if (selectedTeam && findPendingRequest(selectedTeam.id, rec.student.id)) return "pending";
+    if (selectedTeam && pending.teamId === selectedTeam.id && pending.ids.has(rec.student.id))
+      return "pending";
     if (result?.teamFull) return "full";
     return "idle";
   }

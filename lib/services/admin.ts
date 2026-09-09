@@ -7,10 +7,20 @@ import type {
 import type { UserRole } from "./session";
 import { canAccessAdmin } from "./session";
 import { mockStudents, mockCurrentStudent } from "@/lib/mock/students";
+import { isSupabaseConfigured } from "@/lib/supabase/config";
+import { createClient } from "@/lib/supabase/client";
+import { mapProfile, toDbStatus, type DbProfile } from "@/lib/supabase/mappers";
 import { listAllProjects, setProjectStatus, deleteProject } from "./projects";
 import { listTeams, updateTeamStatus, disbandTeam, getTeamSkillGaps } from "./teams";
 import { listAllRequests } from "./requests";
 import { listAllTeamActivity } from "./teams";
+import { listStudents } from "./students";
+import { setProjectStatusAction } from "@/lib/actions/projects";
+import {
+  adminSaveSettingsAction,
+  adminSetUserRoleAction,
+  adminSetUserStatusAction,
+} from "@/lib/actions/admin";
 import { MATCH_WEIGHTS } from "@/lib/matching/weights";
 
 /**
@@ -95,9 +105,26 @@ function allStudents(): Student[] {
   return [mockCurrentStudent, ...mockStudents];
 }
 
+async function allStudentsDb(): Promise<Student[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase.from("profiles").select("*").order("created_at");
+  if (error || !data) return [];
+  return (data as DbProfile[]).map((r) => mapProfile(r));
+}
+
+/** Demo identity rows for the admin users table (mock mode only). */
+function demoRows(): { inactive: Set<string>; admin: Set<string> } {
+  return { inactive: new Set(["elias-mbise"]), admin: new Set(["david-kim"]) };
+}
+
 export async function getAdminUsers(): Promise<AdminUser[]> {
   const [projects, teams] = await Promise.all([listAllProjects(), listTeams()]);
   const overrides = readOverrides();
+  const configured = isSupabaseConfigured();
+  // Supabase mode: role/status come from profiles (authoritative).
+  // Mock mode: fixtures + deterministic demo rows + local overrides.
+  const source: Student[] = configured ? await allStudentsDb() : allStudents();
+  const demo = demoRows();
   const teamsByMember = new Map<string, Team>();
   for (const t of teams) for (const m of t.members) {
     if (!teamsByMember.has(m.studentId)) teamsByMember.set(m.studentId, t);
@@ -106,24 +133,41 @@ export async function getAdminUsers(): Promise<AdminUser[]> {
   for (const p of projects) {
     projectCountByCreator.set(p.creatorId, (projectCountByCreator.get(p.creatorId) ?? 0) + 1);
   }
-  // Deterministic demo statuses: one inactive account, one platform admin.
-  const defaultInactive = new Set(["elias-mbise"]);
-  const defaultAdmin = new Set(["david-kim"]);
 
-  return allStudents().map((s) => ({
-    id: s.id,
-    name: s.fullName,
-    email: emailFor(s.fullName),
-    program: s.program,
-    year: s.year,
-    role: overrides.role[s.id] ?? (defaultAdmin.has(s.id) ? "admin" : "student"),
-    accountStatus:
-      overrides.status[s.id] ?? (defaultInactive.has(s.id) ? "inactive" : "active"),
-    profileCompletion: s.profileCompletion,
-    teamName: teamsByMember.get(s.id)?.projectTitle ?? null,
-    projectCount: projectCountByCreator.get(s.id) ?? 0,
-    joinedAt: s.createdAt,
-  }));
+  return source.map((s) => {
+    const extra = s as Student & { role?: string; isActive?: boolean; email?: string };
+    // Supabase mode: profiles row is authoritative — local overrides never apply.
+    if (configured) {
+      return {
+        id: s.id,
+        name: s.fullName,
+        email: extra.email || emailFor(s.fullName),
+        program: s.program,
+        year: s.year,
+        role: ((extra.role as UserRole) ?? "student") as UserRole,
+        accountStatus: (extra.isActive === false ? "inactive" : "active") as "active" | "inactive",
+        profileCompletion: s.profileCompletion,
+        teamName: teamsByMember.get(s.id)?.projectTitle ?? null,
+        projectCount: projectCountByCreator.get(s.id) ?? 0,
+        joinedAt: s.createdAt,
+      };
+    }
+    return {
+      id: s.id,
+      name: s.fullName,
+      email: emailFor(s.fullName),
+      program: s.program,
+      year: s.year,
+      role: (overrides.role[s.id] ?? (demo.admin.has(s.id) ? "admin" : "student")) as UserRole,
+      accountStatus: (overrides.status[s.id] ?? (demo.inactive.has(s.id) ? "inactive" : "active")) as
+        | "active"
+        | "inactive",
+      profileCompletion: s.profileCompletion,
+      teamName: teamsByMember.get(s.id)?.projectTitle ?? null,
+      projectCount: projectCountByCreator.get(s.id) ?? 0,
+      joinedAt: s.createdAt,
+    };
+  });
 }
 
 export interface UserFilters {
@@ -165,6 +209,10 @@ export async function adminSetUserStatus(
 ): Promise<{ ok: true } | { ok: false; error: AdminError }> {
   const gate = requireAdmin(actorRole);
   if (!gate.ok) return gate;
+  if (isSupabaseConfigured()) {
+    const res = await adminSetUserStatusAction(id, status === "active");
+    return res.ok ? { ok: true } : { ok: false, error: "NOT_FOUND" };
+  }
   const known = allStudents().some((s) => s.id === id);
   if (!known) return { ok: false, error: "NOT_FOUND" };
   const o = readOverrides();
@@ -180,6 +228,10 @@ export async function adminSetUserRole(
 ): Promise<{ ok: true } | { ok: false; error: AdminError }> {
   const gate = requireAdmin(actorRole);
   if (!gate.ok) return gate;
+  if (isSupabaseConfigured()) {
+    const res = await adminSetUserRoleAction(id, role);
+    return res.ok ? { ok: true } : { ok: false, error: "NOT_FOUND" };
+  }
   const known = allStudents().some((s) => s.id === id);
   if (!known) return { ok: false, error: "NOT_FOUND" };
   const o = readOverrides();
@@ -195,6 +247,10 @@ export async function adminSetProjectStatus(
 ): Promise<{ ok: true } | { ok: false; error: AdminError }> {
   const gate = requireAdmin(actorRole);
   if (!gate.ok) return gate;
+  if (isSupabaseConfigured()) {
+    const res = await setProjectStatusAction(id, toDbStatus(status), true);
+    return res.ok ? { ok: true } : { ok: false, error: "NOT_FOUND" };
+  }
   const updated = await setProjectStatus(id, status);
   return updated ? { ok: true } : { ok: false, error: "NOT_FOUND" };
 }
@@ -361,11 +417,12 @@ export interface ReportBundle {
 }
 
 export async function getReports(): Promise<ReportBundle> {
-  const [users, projects, teams, requests] = await Promise.all([
+  const [users, projects, teams, requests, students] = await Promise.all([
     getAdminUsers(),
     listAllProjects(),
     listTeams(),
     listAllRequests(),
+    listStudents(),
   ]);
   const liveProjects = projects.filter((p) => p.status !== "Archived");
   const teamProjectIds = new Set(teams.map((t) => t.projectId));
@@ -389,7 +446,7 @@ export async function getReports(): Promise<ReportBundle> {
     .sort((a, b) => b.count - a.count)
     .slice(0, 6);
 
-  const studentsById = new Map(allStudents().map((s) => [s.id, s]));
+  const studentsById = new Map(students.map((s) => [s.id, s]));
   const gapCount = new Map<string, number>();
   const projectById = new Map(projects.map((p) => [p.id, p]));
   for (const t of teams) {
@@ -464,12 +521,13 @@ export interface AdminActivityItem {
 }
 
 export async function getRecentActivity(limit = 10): Promise<AdminActivityItem[]> {
-  const [teamActivity, requests, projects] = await Promise.all([
+  const [teamActivity, requests, projects, students] = await Promise.all([
     listAllTeamActivity(),
     listAllRequests(),
     listAllProjects(),
+    listStudents(),
   ]);
-  const studentsById = new Map(allStudents().map((s) => [s.id, s]));
+  const studentsById = new Map(students.map((s) => [s.id, s]));
   const projectById = new Map(projects.map((p) => [p.id, p]));
   const items: AdminActivityItem[] = [];
 
@@ -504,7 +562,7 @@ export async function getRecentActivity(limit = 10): Promise<AdminActivityItem[]
       linkHref: `/projects/${p.id}`,
     });
   }
-  for (const s of allStudents().slice(0, 10)) {
+  for (const s of students.slice(0, 10)) {
     items.push({
       id: `act-user-${s.id}`,
       title: `${s.fullName} registered`,
@@ -545,6 +603,22 @@ export function getAdminSettings(): AdminSettings {
   return DEFAULT_SETTINGS;
 }
 
+/** DB-backed settings read (Supabase mode: platform_settings table). */
+export async function getAdminSettingsAsync(): Promise<AdminSettings> {
+  if (!isSupabaseConfigured()) return getAdminSettings();
+  const supabase = createClient();
+  const { data } = await supabase.from("platform_settings").select("key, value");
+  const merged = { ...DEFAULT_SETTINGS };
+  for (const row of ((data ?? []) as { key: string; value: { value?: unknown } }[])) {
+    const v = row.value?.value;
+    if (row.key === "platformName" && typeof v === "string") merged.platformName = v;
+    if (row.key === "defaultTeamSize" && typeof v === "number") merged.defaultTeamSize = v;
+    if (row.key === "minMatchThreshold" && typeof v === "number") merged.minMatchThreshold = v;
+    if (row.key === "notificationsEnabled" && typeof v === "boolean") merged.notificationsEnabled = v;
+  }
+  return merged;
+}
+
 export function saveAdminSettings(next: AdminSettings): AdminSettings {
   const clean: AdminSettings = {
     platformName: next.platformName.trim() || DEFAULT_SETTINGS.platformName,
@@ -558,6 +632,15 @@ export function saveAdminSettings(next: AdminSettings): AdminSettings {
     } catch {
       // ignore
     }
+  }
+  if (isSupabaseConfigured()) {
+    // Persist server-side too (admin-only table); local copy stays as cache.
+    void adminSaveSettingsAction({
+      platformName: clean.platformName,
+      defaultTeamSize: clean.defaultTeamSize,
+      minMatchThreshold: clean.minMatchThreshold,
+      notificationsEnabled: clean.notificationsEnabled,
+    });
   }
   return clean;
 }

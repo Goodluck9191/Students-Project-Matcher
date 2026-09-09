@@ -17,8 +17,7 @@ import {
 import { EMPTY_FILTERS, listProjects } from "@/lib/services/projects";
 import { listStudents } from "@/lib/services/students";
 import { listTeams } from "@/lib/services/teams";
-
-const CURRENT_USER = "me";
+import { getSessionIdentity } from "@/lib/services/session";
 
 /**
  * Compact pending-requests widget wired to the live request service —
@@ -27,31 +26,35 @@ const CURRENT_USER = "me";
  */
 export function PendingRequests() {
   const [views, setViews] = React.useState<EnrichedRequest[] | null>(null);
+  const [myId, setMyId] = React.useState("me");
   const [nonce, setNonce] = React.useState(0);
 
   React.useEffect(() => {
     let cancelled = false;
-    Promise.all([
-      getReceivedRequests(CURRENT_USER),
-      getSentRequests(CURRENT_USER),
-      listStudents(),
-      listProjects(EMPTY_FILTERS),
-      listTeams(),
-    ]).then(([received, sent, students, projects, teams]) => {
+    (async () => {
+      const identity = await getSessionIdentity();
+      const [received, sent, students, projects, teams] = await Promise.all([
+        getReceivedRequests(identity.id),
+        getSentRequests(identity.id),
+        listStudents(),
+        listProjects(EMPTY_FILTERS),
+        listTeams(),
+      ]);
       if (cancelled) return;
+      setMyId(identity.id);
       const pending = [
         ...received.filter((r) => r.status === "pending"),
         ...sent.filter((r) => r.status === "pending"),
       ];
-      setViews(enrichRequests(pending, students, projects, teams, CURRENT_USER));
-    });
+      setViews(enrichRequests(pending, students, projects, teams, identity.id));
+    })();
     return () => {
       cancelled = true;
     };
   }, [nonce]);
 
-  const incoming = (views ?? []).filter((v) => v.request.recipientId === CURRENT_USER);
-  const outgoing = (views ?? []).filter((v) => v.request.senderId === CURRENT_USER);
+  const incoming = (views ?? []).filter((v) => v.request.recipientId === myId);
+  const outgoing = (views ?? []).filter((v) => v.request.senderId === myId);
 
   return (
     <section aria-labelledby="pending-requests" className="min-w-0">
@@ -91,7 +94,7 @@ export function PendingRequests() {
                   </div>
                 </div>
                 <div className="mt-2.5">
-                  <RequestActions view={v} onChanged={() => setNonce((n) => n + 1)} />
+                  <RequestActions view={v} viewerId={myId} onChanged={() => setNonce((n) => n + 1)} />
                 </div>
               </div>
             ))}

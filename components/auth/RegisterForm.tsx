@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
 import { Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Input, Select } from "@/components/ui/Input";
@@ -22,6 +23,7 @@ const YEAR_OPTIONS = [
 ];
 
 export function RegisterForm() {
+  const router = useRouter();
   const { success, error } = useToast();
   const [form, setForm] = React.useState<RegisterInput & { confirmPassword: string }>({
     fullName: "",
@@ -66,14 +68,27 @@ export function RegisterForm() {
     setFormError(null);
     setLoading(true);
     try {
-      const result = await mockSignUp(form);
-      if (result.ok) {
-        setSucceeded(true);
-        success("Account created", result.message);
-      } else {
-        setFormError(result.message);
-        error("Registration failed", result.message);
+      // Supabase mode: real account (role defaults to student) → profile setup.
+      const { signUpAction } = await import("@/lib/actions/auth");
+      const real = await signUpAction(form.email, form.password, form.fullName);
+      if (!real.ok && real.error.includes("not configured")) {
+        const result = await mockSignUp(form);
+        if (result.ok) {
+          setSucceeded(true);
+          success("Account created", result.message);
+        } else {
+          setFormError(result.message);
+          error("Registration failed", result.message);
+        }
+        return;
       }
+      if (real.ok) {
+        success("Account created", "Check your email to confirm, then set up your profile.");
+        router.push("/profile/setup");
+        return;
+      }
+      setFormError(real.error);
+      error("Registration failed", real.error);
     } finally {
       setLoading(false);
     }

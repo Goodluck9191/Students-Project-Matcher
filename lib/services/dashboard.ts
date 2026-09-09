@@ -8,22 +8,21 @@ import type {
   Team,
   TeamRequest,
 } from "@/types";
-import { mockCurrentStudent, mockStudents } from "@/lib/mock/students";
-import { mockProfile } from "@/lib/mock/profile";
+import { mockCurrentStudent } from "@/lib/mock/students";
 import { getMatchTier } from "@/lib/matching/score";
 import { EMPTY_FILTERS, listProjects } from "./projects";
+import { listStudents } from "./students";
+import { getSessionIdentity } from "./session";
 import { listTeams } from "./teams";
 import { getReceivedRequests, getSentRequests } from "./requests";
 import { getNotifications, getUnreadCount } from "./notifications";
 
 /**
- * Dashboard data layer — Stage 4.
+ * Dashboard data layer.
  *
- * The dashboard page calls `getDashboardData()` only. To move to Supabase,
- * replace each section below with a query (profiles, projects, teams,
- * team_requests, notifications) without touching UI components.
- *
- * TODO (Supabase): derive match scores server-side; paginate activity.
+ * The dashboard page calls `getDashboardData()` only. Identity, projects,
+ * teams, requests, and notifications resolve from mock state or Supabase
+ * depending on configuration — UI code is identical either way.
  */
 
 export type { ProjectStatus };
@@ -87,15 +86,19 @@ function toTeammate(student: Student, projectNeeds: string[]): MatchRecommendati
 export async function getDashboardData(): Promise<DashboardData> {
   await delay();
 
-  const [allProjects, allTeams] = await Promise.all([
+  const identity = await getSessionIdentity();
+  const uid = identity.id;
+
+  const [allProjects, allTeams, students] = await Promise.all([
     listProjects(EMPTY_FILTERS),
     listTeams(),
+    listStudents(),
   ]);
 
   const myProjects: MyProject[] = allTeams
-    .filter((t) => t.members.some((m) => m.studentId === "me"))
+    .filter((t) => t.members.some((m) => m.studentId === uid))
     .map((t) => {
-      const me = t.members.find((m) => m.studentId === "me");
+      const me = t.members.find((m) => m.studentId === uid);
       const full = t.members.length >= t.maxMembers;
       return {
         ...t,
@@ -105,20 +108,21 @@ export async function getDashboardData(): Promise<DashboardData> {
     });
 
   const recommendedProjects = allProjects
-    .filter((p) => p.creatorId !== "me")
+    .filter((p) => p.creatorId !== uid)
     .slice(0, 3);
 
   const projectNeeds = ["React", "Node.js", "PostgreSQL", "UI/UX"];
-  const recommendedTeammates = [...mockStudents]
+  const recommendedTeammates = [...students]
+    .filter((s) => s.id !== uid)
     .sort((a, b) => (b.matchScore ?? 0) - (a.matchScore ?? 0))
     .slice(0, 3)
     .map((s) => toTeammate(s, projectNeeds));
 
   const [received, sent, notifications, unreadCount] = await Promise.all([
-    getReceivedRequests("me"),
-    getSentRequests("me"),
-    getNotifications("me"),
-    getUnreadCount("me"),
+    getReceivedRequests(uid),
+    getSentRequests(uid),
+    getNotifications(uid),
+    getUnreadCount(uid),
   ]);
   const pendingReceived = received.filter((r) => r.status === "pending");
   const pendingSent = sent;
@@ -163,12 +167,12 @@ export async function getDashboardData(): Promise<DashboardData> {
 
   return {
     student: mockCurrentStudent,
-    firstName: mockProfile.fullName.split(" ")[0] || mockCurrentStudent.fullName.split(" ")[0],
+    firstName: identity.fullName.split(" ")[0] || "there",
     profileCompletion: mockCurrentStudent.profileCompletion,
     stats: {
       myProjects: myProjects.length,
       recommended: 12,
-      matches: mockStudents.length + 2,
+      matches: students.length,
       pending: pendingReceived.length,
     },
     recommendedProjects,

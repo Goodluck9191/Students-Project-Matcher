@@ -1,12 +1,20 @@
 import type { AppNotification, NotificationType } from "@/types";
 import { mockNotifications } from "@/lib/mock/notifications";
+import { isSupabaseConfigured } from "@/lib/supabase/config";
+import { createClient } from "@/lib/supabase/client";
+import { mapNotification, type DbNotification } from "@/lib/supabase/mappers";
+import {
+  markAllNotificationsReadAction,
+  markNotificationReadAction,
+} from "@/lib/actions/notifications";
 
 /**
- * Notification service — session-scoped mock store.
+ * Notification service — session-scoped mock store, or Supabase.
  * Every request/team event funnels through `createNotification`, so the
  * center always reflects real mock events (never decorative).
  *
- * TODO (Supabase): `notifications` table with RLS (owner-only reads).
+ * Supabase mode: reads/writes via RLS (own rows only); creation happens
+ * server-side through notify_user (see requests flows).
  */
 
 function isBrowser(): boolean {
@@ -58,17 +66,39 @@ async function delay(ms = 250): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+async function listNotificationsDb(): Promise<AppNotification[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("notifications")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(100);
+  if (error || !data) return [];
+  return (data as DbNotification[]).map(mapNotification);
+}
+
 export async function getNotifications(userId: string): Promise<AppNotification[]> {
+  if (isSupabaseConfigured()) {
+    // RLS already scopes to the caller; filter defensively by userId.
+    return (await listNotificationsDb()).filter((n) => n.userId === userId);
+  }
   await delay();
   return clone(store().filter((n) => n.userId === userId).sort(byNewest));
 }
 
 export async function getUnreadCount(userId: string): Promise<number> {
+  if (isSupabaseConfigured()) {
+    return (await listNotificationsDb()).filter((n) => n.userId === userId && !n.isRead).length;
+  }
   await delay(150);
   return store().filter((n) => n.userId === userId && !n.isRead).length;
 }
 
 export async function markAsRead(id: string, userId: string): Promise<boolean> {
+  if (isSupabaseConfigured()) {
+    const res = await markNotificationReadAction(id);
+    return res.ok;
+  }
   await delay(150);
   const item = store().find((n) => n.id === id && n.userId === userId);
   if (!item) return false;
@@ -78,6 +108,11 @@ export async function markAsRead(id: string, userId: string): Promise<boolean> {
 }
 
 export async function markAllAsRead(userId: string): Promise<number> {
+  if (isSupabaseConfigured()) {
+    const res = await markAllNotificationsReadAction();
+    if (!res.ok) return 0;
+    return res.data.count;
+  }
   await delay(250);
   let count = 0;
   for (const n of store()) {

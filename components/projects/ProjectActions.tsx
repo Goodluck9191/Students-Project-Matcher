@@ -8,13 +8,12 @@ import { useToast } from "@/components/ui/Toast";
 import { isProjectOwner } from "@/lib/services/projects";
 import {
   REQUEST_ERROR_MESSAGES,
-  findUserProjectRequest,
+  getUserProjectRequest,
   sendJoinRequest,
 } from "@/lib/services/requests";
 import { getTeamForProject, isTeamFull } from "@/lib/services/teams";
+import { getSessionIdentity } from "@/lib/services/session";
 import type { Project, Team } from "@/types";
-
-const CURRENT_USER = "me";
 
 /**
  * Contextual CTA block for project details, driven by live request/team
@@ -26,21 +25,26 @@ export function ProjectActions({ project }: { project: Project }) {
   const [team, setTeam] = React.useState<Team | null>(null);
   const [sending, setSending] = React.useState(false);
   const [nonce, setNonce] = React.useState(0);
+  const [myId, setMyId] = React.useState("me");
+  const [pendingId, setPendingId] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     let cancelled = false;
-    getTeamForProject(project.id).then((t) => {
-      if (!cancelled) setTeam(t ?? null);
-    });
+    (async () => {
+      const identity = await getSessionIdentity();
+      if (cancelled) return;
+      setMyId(identity.id);
+      setTeam((await getTeamForProject(project.id)) ?? null);
+      setPendingId(
+        (await getUserProjectRequest(project.id, identity.id))?.id ?? null
+      );
+    })();
     return () => {
       cancelled = true;
     };
   }, [project.id, nonce]);
 
-  // Derived each render (bumped by nonce) so sent requests reflect immediately.
-  const pendingId = findUserProjectRequest(project.id, CURRENT_USER)?.id ?? null;
-
-  if (isProjectOwner(project)) {
+  if (isProjectOwner(project, myId)) {
     return (
       <div className="flex flex-col gap-2">
         <Button href={`/projects/${project.id}/edit`} className="w-full">
@@ -56,7 +60,7 @@ export function ProjectActions({ project }: { project: Project }) {
     );
   }
 
-  const isMember = team?.members.some((m) => m.studentId === CURRENT_USER) ?? false;
+  const isMember = team?.members.some((m) => m.studentId === myId) ?? false;
   if (isMember && team) {
     return (
       <div className="flex flex-col gap-2">
@@ -94,7 +98,7 @@ export function ProjectActions({ project }: { project: Project }) {
 
   async function handleJoin() {
     setSending(true);
-    const res = await sendJoinRequest({ projectId: project.id, senderId: CURRENT_USER });
+    const res = await sendJoinRequest({ projectId: project.id, senderId: myId });
     setSending(false);
     if (!res.ok) {
       error("Couldn't send the request", REQUEST_ERROR_MESSAGES[res.error]);

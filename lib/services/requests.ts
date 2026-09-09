@@ -4,18 +4,23 @@ import { addTeamMember, getTeamById, getTeamForProject, isTeamFull } from "./tea
 import { getProjectById } from "./projects";
 import { getStudentById } from "./students";
 import { createNotification } from "./notifications";
+import { isSupabaseConfigured } from "@/lib/supabase/config";
+import { createClient } from "@/lib/supabase/client";
+import { mapTeamRequest, type DbTeamRequest } from "@/lib/supabase/mappers";
+import {
+  acceptRequestAction,
+  cancelRequestAction,
+  rejectRequestAction,
+  sendInvitationAction,
+  sendJoinRequestAction,
+} from "@/lib/actions/requests";
 
 /**
- * Request service — invitations + join requests over a session-scoped store.
+ * Request service — invitations + join requests.
  *
- * Centralized flow (single place keeping teams/requests/notifications
- * consistent — UI never edits multiple stores by hand):
- *
- *   sendTeamInvitation() → createNotification(recipient)
- *   acceptRequest() → addTeamMember() → status → createNotification(other party)
- *   rejectRequest() / cancelRequest() → status → notify sender (reject only)
- *
- * TODO (Supabase): `team_requests` table with RLS (participants only).
+ * Mock mode: session-scoped store (centralized team/notification updates).
+ * Supabase mode: reads via RLS; mutations via Server Actions (accept runs
+ * the atomic `accept_team_request` RPC). UI code is identical either way.
  */
 
 function isBrowser(): boolean {
@@ -100,23 +105,51 @@ export const REQUEST_ERROR_MESSAGES: Record<RequestError, string> = {
 
 type Result<T> = { ok: true; request: T } | { ok: false; error: RequestError };
 
+async function listRequestsDb(): Promise<TeamRequest[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("team_requests")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(200);
+  if (error || !data) return [];
+  return (data as DbTeamRequest[]).map(mapTeamRequest);
+}
+
 export async function getReceivedRequests(userId: string): Promise<TeamRequest[]> {
+  if (isSupabaseConfigured()) {
+    return (await listRequestsDb())
+      .filter((r) => r.recipientId === userId)
+      .sort(byNewest);
+  }
   await delay(200);
   return clone(store().filter((r) => r.recipientId === userId).sort(byNewest));
 }
 
 export async function getSentRequests(userId: string): Promise<TeamRequest[]> {
+  if (isSupabaseConfigured()) {
+    return (await listRequestsDb()).filter((r) => r.senderId === userId).sort(byNewest);
+  }
   await delay(200);
   return clone(store().filter((r) => r.senderId === userId).sort(byNewest));
 }
 
 export async function getRequestById(id: string): Promise<TeamRequest | null> {
+  if (isSupabaseConfigured()) {
+    const supabase = createClient();
+    const { data, error } = await supabase.from("team_requests").select("*").eq("id", id).single();
+    if (error || !data) return null;
+    return mapTeamRequest(data as DbTeamRequest);
+  }
   await delay(150);
   return clone(store().find((r) => r.id === id) ?? null);
 }
 
 /** Admin view: every request in the session store, newest first. */
 export async function listAllRequests(): Promise<TeamRequest[]> {
+  if (isSupabaseConfigured()) {
+    return listRequestsDb();
+  }
   await delay(200);
   return clone([...store()].sort(byNewest));
 }
@@ -131,6 +164,38 @@ export function findPendingRequest(teamId: string, studentId: string): TeamReque
   );
 }
 
+/** DB-aware variant for Supabase mode (async; same semantics). */
+export async function getPendingForTeam(
+  teamId: string,
+  studentId: string
+): Promise<TeamRequest | undefined> {
+  if (!isSupabaseConfigured()) return findPendingRequest(teamId, studentId);
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("team_requests")
+    .select("*")
+    .eq("team_id", teamId)
+    .eq("status", "pending")
+    .or(`recipient_id.eq.${studentId},sender_id.eq.${studentId}`)
+    .limit(1);
+  const row = (data as DbTeamRequest[] | null)?.[0];
+  return row ? mapTeamRequest(row) : undefined;
+}
+
+/** All pending requests touching a team (for invite-state derivation). */
+export async function listTeamPendingRequests(teamId: string): Promise<TeamRequest[]> {
+  if (!isSupabaseConfigured()) {
+    return clone(store().filter((r) => r.teamId === teamId && r.status === "pending"));
+  }
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("team_requests")
+    .select("*")
+    .eq("team_id", teamId)
+    .eq("status", "pending");
+  return ((data as DbTeamRequest[] | null) ?? []).map(mapTeamRequest);
+}
+
 /** Pending request from a user for a project (join-request state on project page). */
 export function findUserProjectRequest(
   projectId: string,
@@ -139,6 +204,24 @@ export function findUserProjectRequest(
   return store().find(
     (r) => r.projectId === projectId && r.status === "pending" && (r.senderId === userId || r.recipientId === userId)
   );
+}
+
+/** DB-aware variant for Supabase mode (async; same semantics). */
+export async function getUserProjectRequest(
+  projectId: string,
+  userId: string
+): Promise<TeamRequest | undefined> {
+  if (!isSupabaseConfigured()) return findUserProjectRequest(projectId, userId);
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("team_requests")
+    .select("*")
+    .eq("project_id", projectId)
+    .eq("status", "pending")
+    .or(`sender_id.eq.${userId},recipient_id.eq.${userId}`)
+    .limit(1);
+  const row = (data as DbTeamRequest[] | null)?.[0];
+  return row ? mapTeamRequest(row) : undefined;
 }
 
 function newId(prefix: string): string {
@@ -152,6 +235,17 @@ export async function sendTeamInvitation(args: {
   message?: string;
   match?: number;
 }): Promise<Result<TeamRequest>> {
+  if (isSupabaseConfigured()) {
+    const res = await sendInvitationAction({
+      teamId: args.teamId,
+      recipientId: args.recipientId,
+      message: args.message,
+    });
+    if (!res.ok) return { ok: false, error: mapActionError(res.code) };
+    const created = await getRequestById(res.data.id);
+    if (!created) return { ok: false, error: "REQUEST_NOT_FOUND" };
+    return { ok: true, request: created };
+  }
   await delay();
   const team = await getTeamById(args.teamId);
   if (!team) return { ok: false, error: "TEAM_NOT_FOUND" };
@@ -199,6 +293,13 @@ export async function sendJoinRequest(args: {
   senderId: string;
   message?: string;
 }): Promise<Result<TeamRequest>> {
+  if (isSupabaseConfigured()) {
+    const res = await sendJoinRequestAction(args.projectId, args.message);
+    if (!res.ok) return { ok: false, error: mapActionError(res.code) };
+    const created = await getRequestById(res.data.id);
+    if (!created) return { ok: false, error: "REQUEST_NOT_FOUND" };
+    return { ok: true, request: created };
+  }
   await delay();
   const project = await getProjectById(args.projectId);
   if (!project) return { ok: false, error: "PROJECT_NOT_FOUND" };
@@ -242,10 +343,39 @@ function setStatus(request: TeamRequest, status: TeamRequestStatus): void {
   persist();
 }
 
+/** Map server-action codes onto the UI's RequestError vocabulary. */
+function mapActionError(code: string): RequestError {
+  switch (code) {
+    case "NOT_FOUND":
+      return "REQUEST_NOT_FOUND";
+    case "CONFLICT":
+      return "NOT_PENDING";
+    case "FORBIDDEN":
+      return "NOT_RECIPIENT";
+    case "VALIDATION":
+      return "SELF_INVITE";
+    case "UNAUTHENTICATED":
+      return "NOT_PARTICIPANT";
+    default:
+      return "REQUEST_NOT_FOUND";
+  }
+}
+
 export async function acceptRequest(
   id: string,
   actorId: string
 ): Promise<Result<TeamRequest>> {
+  if (isSupabaseConfigured()) {
+    const res = await acceptRequestAction(id);
+    if (!res.ok) {
+      if (res.code === "CONFLICT" && res.error.includes("full")) return { ok: false, error: "TEAM_FULL" };
+      if (res.code === "CONFLICT") return { ok: false, error: "ALREADY_MEMBER" };
+      return { ok: false, error: mapActionError(res.code) };
+    }
+    const updated = await getRequestById(id);
+    if (!updated) return { ok: false, error: "REQUEST_NOT_FOUND" };
+    return { ok: true, request: updated };
+  }
   await delay(450);
   const request = store().find((r) => r.id === id);
   if (!request) return { ok: false, error: "REQUEST_NOT_FOUND" };
@@ -313,6 +443,13 @@ export async function rejectRequest(
   id: string,
   actorId: string
 ): Promise<Result<TeamRequest>> {
+  if (isSupabaseConfigured()) {
+    const res = await rejectRequestAction(id);
+    if (!res.ok) return { ok: false, error: mapActionError(res.code) };
+    const updated = await getRequestById(id);
+    if (!updated) return { ok: false, error: "REQUEST_NOT_FOUND" };
+    return { ok: true, request: updated };
+  }
   await delay(400);
   const request = store().find((r) => r.id === id);
   if (!request) return { ok: false, error: "REQUEST_NOT_FOUND" };
@@ -337,6 +474,16 @@ export async function cancelRequest(
   id: string,
   actorId: string
 ): Promise<Result<TeamRequest>> {
+  if (isSupabaseConfigured()) {
+    const res = await cancelRequestAction(id);
+    if (!res.ok) {
+      if (res.code === "FORBIDDEN") return { ok: false, error: "NOT_SENDER" };
+      return { ok: false, error: mapActionError(res.code) };
+    }
+    const updated = await getRequestById(id);
+    if (!updated) return { ok: false, error: "REQUEST_NOT_FOUND" };
+    return { ok: true, request: updated };
+  }
   await delay(400);
   const request = store().find((r) => r.id === id);
   if (!request) return { ok: false, error: "REQUEST_NOT_FOUND" };
