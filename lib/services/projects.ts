@@ -378,6 +378,10 @@ export async function createProject(
   };
   sessionProjects.unshift(project);
   writeStored(project);
+  // Workspace on demand: every project gets a team row so invites and
+  // join requests work immediately (dynamic import avoids a service cycle).
+  const { ensureTeamForProject } = await import("./teams");
+  await ensureTeamForProject(project.id, author.id);
   return project;
 }
 

@@ -170,7 +170,7 @@ export default function ProfileSetupPage() {
     const done = {
       ...draft,
       availability: deriveAvailabilitySlots(draft),
-      profileCompletion: 100,
+      profileCompletion: computeCompletion({ ...draft, availability: deriveAvailabilitySlots(draft) }),
       updatedAt: new Date().toISOString(),
     };
     setDraft(done);

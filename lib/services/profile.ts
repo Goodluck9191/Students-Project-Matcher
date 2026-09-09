@@ -235,20 +235,38 @@ export function validateComplete(draft: StudentProfile): ProfileErrors {
 }
 
 /**
- * Weighted completion percentage shown as "Profile completion: X%".
- * Weights mirror what the future matching engine consumes.
+ * Centralized profile-completion calculation (0–100, clamped).
+ * THE single function used by the profile page, setup wizard, and dashboard.
+ *
+ * Required fields (must all be present for 100% alongside the boosters):
+ * full name 10, bio 10, university 5, program 10, year 5, ≥1 skill 15,
+ * ≥1 interest 5, availability days/times 8, work style 5, email 5, avatar 5.
+ * Boosters: 3+ skills 5, 2+ interests 5, previous experience 4,
+ * department 1, graduation year 2. Total = 100.
+ * Empty arrays never count as complete. Skill levels feed matching,
+ * not completion.
  */
 export function computeCompletion(draft: StudentProfile): number {
   let score = 0;
   if (draft.fullName.trim()) score += 10;
   if (draft.bio.trim()) score += 10;
-  if (draft.university.trim() && draft.program.trim() && draft.year) score += 20;
-  if (draft.skills.length > 0) score += 20;
+  if (draft.university.trim()) score += 5;
+  if (draft.program.trim()) score += 10;
+  if (draft.year) score += 5;
+  if (draft.skills.length > 0) score += 15;
   if (draft.skills.length >= 3) score += 5;
-  if (draft.interests.length > 0) score += 10;
+  if (draft.interests.length > 0) score += 5;
   if (draft.interests.length >= 2) score += 5;
-  if (draft.availableDays.length > 0 || draft.dayTimes.length > 0) score += 10;
+  if (draft.availableDays.length > 0 || draft.dayTimes.length > 0) score += 8;
   if (draft.workStyle) score += 5;
-  if (draft.previousExperience?.trim()) score += 5;
-  return Math.min(100, score);
+  if ((draft.email ?? "").trim()) score += 5;
+  if (
+    draft.avatarUrl &&
+    (draft.avatarUrl.startsWith("http://") || draft.avatarUrl.startsWith("https://"))
+  )
+    score += 5;
+  if (draft.previousExperience?.trim()) score += 4;
+  if (draft.department?.trim()) score += 1;
+  if (draft.graduationYear?.trim()) score += 2;
+  return Math.min(100, Math.max(0, score));
 }

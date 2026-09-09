@@ -17,8 +17,8 @@ To use the real backend:
 
 ## 3. Apply migrations
 Using SQL editor (in order) or CLI:
-- `supabase/migrations/001_profiles.sql` … `012_avatars_storage.sql`
-  (tables → indexes/RLS → RPCs → self-insert → extra profile columns → avatars bucket).
+- `supabase/migrations/001_profiles.sql` … `015_ensure_project_team.sql`
+  (tables → indexes/RLS → RPCs → self-insert → extra profile columns → avatars bucket → member update → one-team-per-project → ensure-team RPC).
 - CLI alternative: `npx supabase db push` (requires `supabase/` linked project).
 
 ## 4. Seed development data

@@ -131,3 +131,69 @@ export async function disbandTeamAction(teamId: string): Promise<ActionResult> {
   if (error) return fail("DB_ERROR", "Couldn't disband the team.");
   return done(undefined);
 }
+
+/**
+ * Get-or-create the workspace team for a project. Only the project
+ * creator may create it (verified server-side); the creator becomes the
+ * owner + first member. Idempotent under races via teams_project_unique.
+ */
+export async function ensureTeamAction(projectId: string): Promise<ActionResult<{ id: string }>> {
+  if (!isSupabaseConfigured()) return notConfigured();
+  const check = await requireUser();
+  if (!check.ok) return fail(check.reason, "You must be signed in.");
+  const supabase = await createClient();
+
+  const { data: project } = await supabase
+    .from("projects")
+    .select("id, name, creator_id")
+    .eq("id", projectId)
+    .single();
+  const p = project as { id: string; name: string; creator_id: string } | null;
+  if (!p) return fail("NOT_FOUND", "This project no longer exists.");
+  if (p.creator_id !== check.profile.id)
+    return fail("FORBIDDEN", "Only the project creator can set up its team.");
+
+  const { data: existing } = await supabase
+    .from("teams")
+    .select("id")
+    .eq("project_id", projectId)
+    .maybeSingle();
+  if (existing) return done({ id: (existing as { id: string }).id });
+
+  const { data: created, error } = await supabase
+    .from("teams")
+    .insert({
+      project_id: projectId,
+      owner_id: check.profile.id,
+      name: p.name,
+      status: "recruiting",
+      progress: 0,
+    })
+    .select("id")
+    .single();
+  if (error) {
+    // Lost a race with another creation → read the winner.
+    if (error.code === "23505") {
+      const { data: winner } = await supabase
+        .from("teams")
+        .select("id")
+        .eq("project_id", projectId)
+        .single();
+      if (winner) return done({ id: (winner as { id: string }).id });
+    }
+    return fail("DB_ERROR", "Couldn't set up the team workspace.");
+  }
+  const teamId = (created as { id: string }).id;
+  const { error: memberError } = await supabase.from("team_members").insert({
+    team_id: teamId,
+    user_id: check.profile.id,
+    team_role: "owner",
+    project_role: "Project Lead",
+  });
+  if (memberError) return fail("DB_ERROR", "Couldn't set up the team workspace.");
+  await supabase.rpc("post_system_message", {
+    p_team_id: teamId,
+    p_content: "Team workspace created.",
+  });
+  return done({ id: teamId });
+}

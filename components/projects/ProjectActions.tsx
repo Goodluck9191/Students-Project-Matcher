@@ -104,7 +104,7 @@ export function ProjectActions({ project }: { project: Project }) {
       error("Couldn't send the request", REQUEST_ERROR_MESSAGES[res.error]);
       return;
     }
-    success("Request sent", "The project owner has been notified (demo mode).");
+    success("Request sent", "The project owner has been notified.");
     setNonce((n) => n + 1);
   }
 

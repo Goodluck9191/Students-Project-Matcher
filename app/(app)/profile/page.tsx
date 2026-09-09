@@ -183,7 +183,9 @@ export default function OwnProfilePage() {
   }
 
   if (!editing) {
-    const active = activeProfile;
+    // Always display the centralized calculation so this page and the
+    // dashboard can never disagree.
+    const active = { ...activeProfile, profileCompletion: computeCompletion(activeProfile) };
     return (
       <div className="space-y-4">
         <PageHeader

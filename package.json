@@ -7,12 +7,15 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "npm run test:matching && npm run test:teams && npm run test:requests && npm run test:chat && npm run test:admin && npm run test:supabase && npm run test:dashboard",
     "test:matching": "node --loader ./scripts/ts-resolve-loader.mjs scripts/matching-tests.ts",
     "test:teams": "node --loader ./scripts/ts-resolve-loader.mjs scripts/teams-tests.ts",
     "test:requests": "node --loader ./scripts/ts-resolve-loader.mjs scripts/requests-tests.ts",
     "test:chat": "node --loader ./scripts/ts-resolve-loader.mjs scripts/chat-tests.ts",
     "test:admin": "node --loader ./scripts/ts-resolve-loader.mjs scripts/admin-tests.ts",
-    "test:supabase": "node --loader ./scripts/ts-resolve-loader.mjs scripts/supabase-tests.ts"
+    "test:supabase": "node --loader ./scripts/ts-resolve-loader.mjs scripts/supabase-tests.ts",
+    "test:dashboard": "node --loader ./scripts/ts-resolve-loader.mjs scripts/dashboard-tests.ts",
+    "test:live": "node scripts/live-supabase-tests.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

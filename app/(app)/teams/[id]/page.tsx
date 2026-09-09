@@ -32,6 +32,7 @@ import {
   isTeamOwner,
   leaveTeam,
   removeMember,
+  transferOwnership,
   updateMemberRole,
   updateTeamStatus,
 } from "@/lib/services/teams";
@@ -68,6 +69,7 @@ export default function TeamDetailsPage() {
   const [leaveOpen, setLeaveOpen] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [statusBusy, setStatusBusy] = React.useState(false);
+  const [transferring, setTransferring] = React.useState(false);
   const [myId, setMyId] = React.useState("me");
 
   React.useEffect(() => {
@@ -192,6 +194,25 @@ export default function TeamDetailsPage() {
     void refreshActivity();
   }
 
+  async function handleTransferOwnership(newOwnerId: string) {
+    if (!team || !newOwnerId) return;
+    setTransferring(true);
+    const res = await transferOwnership(team.id, newOwnerId, myId);
+    setTransferring(false);
+    if (!res.ok) {
+      error(
+        "Couldn't transfer ownership",
+        res.error === "NOT_OWNER"
+          ? "Only the current owner can transfer ownership."
+          : "Please try again."
+      );
+      return;
+    }
+    setTeam(res.team);
+    success("Ownership transferred", "The new owner now manages this team.");
+    void refreshActivity();
+  }
+
   if (team === undefined || !students) {
     return (
       <div className="space-y-4" role="status" aria-label="Loading team">
@@ -238,7 +259,13 @@ export default function TeamDetailsPage() {
       <div className="mt-6 grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="min-w-0 space-y-5">
           {owner && (
-            <TeamManagement team={team} onStatusChange={handleStatusChange} changing={statusBusy} />
+            <TeamManagement
+              team={team}
+              onStatusChange={handleStatusChange}
+              changing={statusBusy}
+              onTransferOwnership={handleTransferOwnership}
+              transferring={transferring}
+            />
           )}
 
           <Card>

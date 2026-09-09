@@ -15,7 +15,7 @@ import { listTeams, updateTeamStatus, disbandTeam, getTeamSkillGaps } from "./te
 import { listAllRequests } from "./requests";
 import { listAllTeamActivity } from "./teams";
 import { listStudents } from "./students";
-import { setProjectStatusAction } from "@/lib/actions/projects";
+import { deleteProjectAction, setProjectStatusAction } from "@/lib/actions/projects";
 import {
   adminSaveSettingsAction,
   adminSetUserRoleAction,
@@ -202,17 +202,27 @@ function requireAdmin(role: UserRole): { ok: true } | { ok: false; error: AdminE
   return canAccessAdmin(role) ? { ok: true } : { ok: false, error: "FORBIDDEN" };
 }
 
+/**
+ * Mock-mode gate. In Supabase mode the gate is SKIPPED here on purpose:
+ * the caller's localStorage role is untrusted, so authorization happens
+ * inside the Server Action (requireAdmin on the DB row) instead.
+ */
+function mockGate(actorRole: UserRole) {
+  return requireAdmin(actorRole);
+}
+
 export async function adminSetUserStatus(
   id: string,
   status: AccountStatus,
   actorRole: UserRole
 ): Promise<{ ok: true } | { ok: false; error: AdminError }> {
-  const gate = requireAdmin(actorRole);
-  if (!gate.ok) return gate;
   if (isSupabaseConfigured()) {
     const res = await adminSetUserStatusAction(id, status === "active");
-    return res.ok ? { ok: true } : { ok: false, error: "NOT_FOUND" };
+    if (res.ok) return { ok: true };
+    return { ok: false, error: res.code === "FORBIDDEN" || res.code === "UNAUTHENTICATED" ? "FORBIDDEN" : "NOT_FOUND" };
   }
+  const gate = mockGate(actorRole);
+  if (!gate.ok) return gate;
   const known = allStudents().some((s) => s.id === id);
   if (!known) return { ok: false, error: "NOT_FOUND" };
   const o = readOverrides();
@@ -226,12 +236,13 @@ export async function adminSetUserRole(
   role: UserRole,
   actorRole: UserRole
 ): Promise<{ ok: true } | { ok: false; error: AdminError }> {
-  const gate = requireAdmin(actorRole);
-  if (!gate.ok) return gate;
   if (isSupabaseConfigured()) {
     const res = await adminSetUserRoleAction(id, role);
-    return res.ok ? { ok: true } : { ok: false, error: "NOT_FOUND" };
+    if (res.ok) return { ok: true };
+    return { ok: false, error: res.code === "FORBIDDEN" || res.code === "UNAUTHENTICATED" ? "FORBIDDEN" : "NOT_FOUND" };
   }
+  const gate = mockGate(actorRole);
+  if (!gate.ok) return gate;
   const known = allStudents().some((s) => s.id === id);
   if (!known) return { ok: false, error: "NOT_FOUND" };
   const o = readOverrides();
@@ -245,12 +256,13 @@ export async function adminSetProjectStatus(
   status: ProjectStatus,
   actorRole: UserRole
 ): Promise<{ ok: true } | { ok: false; error: AdminError }> {
-  const gate = requireAdmin(actorRole);
-  if (!gate.ok) return gate;
   if (isSupabaseConfigured()) {
     const res = await setProjectStatusAction(id, toDbStatus(status), true);
-    return res.ok ? { ok: true } : { ok: false, error: "NOT_FOUND" };
+    if (res.ok) return { ok: true };
+    return { ok: false, error: res.code === "FORBIDDEN" || res.code === "UNAUTHENTICATED" ? "FORBIDDEN" : "NOT_FOUND" };
   }
+  const gate = mockGate(actorRole);
+  if (!gate.ok) return gate;
   const updated = await setProjectStatus(id, status);
   return updated ? { ok: true } : { ok: false, error: "NOT_FOUND" };
 }
@@ -266,7 +278,12 @@ export async function adminDeleteProject(
   id: string,
   actorRole: UserRole
 ): Promise<{ ok: true } | { ok: false; error: AdminError }> {
-  const gate = requireAdmin(actorRole);
+  if (isSupabaseConfigured()) {
+    const res = await deleteProjectAction(id, true);
+    if (res.ok) return { ok: true };
+    return { ok: false, error: res.code === "FORBIDDEN" || res.code === "UNAUTHENTICATED" ? "FORBIDDEN" : "NOT_FOUND" };
+  }
+  const gate = mockGate(actorRole);
   if (!gate.ok) return gate;
   const deleted = await deleteProject(id);
   return deleted ? { ok: true } : { ok: false, error: "NOT_FOUND" };

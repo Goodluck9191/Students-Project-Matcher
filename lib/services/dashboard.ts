@@ -9,6 +9,7 @@ import type {
   TeamRequest,
 } from "@/types";
 import { mockCurrentStudent } from "@/lib/mock/students";
+import { mockProfile } from "@/lib/mock/profile";
 import { getMatchTier } from "@/lib/matching/score";
 import { EMPTY_FILTERS, listProjects } from "./projects";
 import { listStudents } from "./students";
@@ -16,6 +17,9 @@ import { getSessionIdentity } from "./session";
 import { listTeams } from "./teams";
 import { getReceivedRequests, getSentRequests } from "./requests";
 import { getNotifications, getUnreadCount } from "./notifications";
+import { listAllTeamActivity } from "./teams";
+import { getUserActivityFeed } from "./activity";
+import { computeCompletion, loadPersistedProfile } from "./profile";
 
 /**
  * Dashboard data layer.
@@ -108,8 +112,12 @@ export async function getDashboardData(): Promise<DashboardData> {
     });
 
   const recommendedProjects = allProjects
-    .filter((p) => p.creatorId !== uid)
+    .filter((p) => p.creatorId !== uid && p.status !== "Archived")
     .slice(0, 3);
+
+  const eligibleProjectCount = allProjects.filter(
+    (p) => p.creatorId !== uid && p.status !== "Archived" && p.currentMembers < p.maxTeamSize
+  ).length;
 
   const projectNeeds = ["React", "Node.js", "PostgreSQL", "UI/UX"];
   const recommendedTeammates = [...students]
@@ -118,60 +126,55 @@ export async function getDashboardData(): Promise<DashboardData> {
     .slice(0, 3)
     .map((s) => toTeammate(s, projectNeeds));
 
-  const [received, sent, notifications, unreadCount] = await Promise.all([
+  const [received, sent, notifications, unreadCount, persisted, teamActivity] = await Promise.all([
     getReceivedRequests(uid),
     getSentRequests(uid),
     getNotifications(uid),
     getUnreadCount(uid),
+    loadPersistedProfile(),
+    listAllTeamActivity(),
   ]);
   const pendingReceived = received.filter((r) => r.status === "pending");
   const pendingSent = sent;
 
-  const activity: ActivityItem[] = [
-    {
-      id: "act-1",
-      title: "Sarah accepted your invitation",
-      detail: "University Asset Management System",
-      createdAt: notifications[2]?.createdAt ?? new Date().toISOString(),
-      linkHref: "/teams",
-    },
-    {
-      id: "act-2",
-      title: "You received a new teammate recommendation",
-      detail: "Sarah Michael · 94% match",
-      createdAt: notifications[1]?.createdAt ?? new Date().toISOString(),
-      linkHref: "/matches",
-    },
-    {
-      id: "act-3",
-      title: "You created “University Asset Management System”",
-      createdAt:
-        allProjects.find((p) => p.id === "asset-management")?.createdAt ??
-        new Date().toISOString(),
-      linkHref: "/projects/asset-management",
-    },
-    {
-      id: "act-4",
-      title: "John requested to join your project",
-      detail: "University Asset Management System · 91%",
-      createdAt: received[0]?.createdAt ?? new Date().toISOString(),
-      linkHref: "/requests",
-    },
-    {
-      id: "act-5",
-      title: "Your profile reached 80% completion",
-      createdAt: received[1]?.createdAt ?? new Date().toISOString(),
-      linkHref: "/profile/setup",
-    },
-  ];
+  // Profile completion from the REAL profile via the centralized formula.
+  // Mock mode: the persisted loader reports "mock", so score the fixture
+  // with the same function the profile page uses.
+  const completionSource =
+    persisted.status === "ok" ? persisted.profile : { ...mockProfile, id: uid };
+  const profileCompletion = computeCompletion(completionSource);
+
+  // Strongest = user's own top skills; missing = top required skills across
+  // recommended projects that the user does not have.
+  const levelRank: Record<string, number> = { Beginner: 0, Intermediate: 1, Advanced: 2 };
+  const strongestSkills = [...completionSource.skills]
+    .sort((a, b) => (levelRank[b.level] ?? 1) - (levelRank[a.level] ?? 1))
+    .slice(0, 3)
+    .map((s) => s.skill);
+  const owned = new Set(completionSource.skills.map((s) => s.skill));
+  const missingSkills = [
+    ...new Set(recommendedProjects.flatMap((p) => p.requiredSkills)),
+  ]
+    .filter((s) => !owned.has(s))
+    .slice(0, 3);
+
+  const activity = getUserActivityFeed({
+    userId: uid,
+    students,
+    projects: allProjects,
+    teams: allTeams,
+    requests: [...received, ...sent],
+    teamActivity,
+    limit: 5,
+  });
 
   return {
     student: mockCurrentStudent,
     firstName: identity.fullName.split(" ")[0] || "there",
-    profileCompletion: mockCurrentStudent.profileCompletion,
+    profileCompletion,
     stats: {
       myProjects: myProjects.length,
-      recommended: 12,
+      recommended: eligibleProjectCount,
       matches: students.length,
       pending: pendingReceived.length,
     },
@@ -183,7 +186,7 @@ export async function getDashboardData(): Promise<DashboardData> {
     pendingSent,
     notifications: notifications.slice(0, 4),
     unreadCount,
-    strongestSkills: ["React", "TypeScript", "Node.js"],
-    missingSkills: ["UI/UX", "Testing", "Documentation"],
+    strongestSkills,
+    missingSkills,
   };
 }

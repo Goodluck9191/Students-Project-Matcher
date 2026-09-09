@@ -158,12 +158,14 @@ export interface ProfileExtra {
   availableDays: string[];
   dayTimes: string[];
   workStyle?: string;
-  skillLevels: { skill: string; level: "Beginner" | "Intermediate" | "Advanced" }[];
+  skillLevels: SkillLevelTuple[];
 }
 
 const SKILL_LEVELS = ["Beginner", "Intermediate", "Advanced"] as const;
 
-function skillLevels(value: unknown): ProfileExtra["skillLevels"] {
+export type SkillLevelTuple = { skill: string; level: (typeof SKILL_LEVELS)[number] };
+
+function skillLevels(value: unknown): SkillLevelTuple[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((v) => {
     if (
@@ -192,7 +194,7 @@ export function mapProfileExtra(row: DbProfile): ProfileExtra {
   };
 }
 
-export function mapProfile(row: DbProfile): Student & { role: string; isActive: boolean; email: string } {
+export function mapProfile(row: DbProfile): Student & { role: string; isActive: boolean; email: string; skillLevels: SkillLevelTuple[] } {
   return {
     id: row.id,
     fullName: row.full_name ?? "",
@@ -210,6 +212,7 @@ export function mapProfile(row: DbProfile): Student & { role: string; isActive: 
     role: row.role ?? "student",
     isActive: row.is_active ?? true,
     email: row.email ?? "",
+    skillLevels: skillLevels(row.skill_levels),
   };
 }
 

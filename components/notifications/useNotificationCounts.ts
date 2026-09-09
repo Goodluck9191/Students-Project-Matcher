@@ -1,34 +1,63 @@
 "use client";
 
 import * as React from "react";
-import { getUnreadCount } from "@/lib/services/notifications";
-import { getReceivedRequests } from "@/lib/services/requests";
+import { getUnreadCount, subscribeToNotifications } from "@/lib/services/notifications";
+import { getReceivedRequests, subscribeToRequests } from "@/lib/services/requests";
+import { getSessionIdentity } from "@/lib/services/session";
 
-/** Live navbar/sidebar counts for the demo user (remount refreshes). */
-export function useUnreadCount(userId = "me"): number {
-  const [count, setCount] = React.useState(0);
+function useResolvedUserId(userId?: string): string | null {
+  const [resolvedId, setResolvedId] = React.useState<string | null>(userId ?? null);
   React.useEffect(() => {
+    if (userId) return;
     let cancelled = false;
-    getUnreadCount(userId).then((c) => {
-      if (!cancelled) setCount(c);
+    getSessionIdentity().then((identity) => {
+      if (!cancelled) setResolvedId(identity.id);
     });
     return () => {
       cancelled = true;
     };
   }, [userId]);
+  return resolvedId;
+}
+
+/** Live navbar/sidebar counts for the current user (remount + realtime refresh). */
+export function useUnreadCount(userId?: string): number {
+  const resolvedId = useResolvedUserId(userId);
+  const [count, setCount] = React.useState(0);
+
+  React.useEffect(() => {
+    if (!resolvedId) return;
+    let cancelled = false;
+    getUnreadCount(resolvedId).then((c) => {
+      if (!cancelled) setCount(c);
+    });
+    const unsubscribe = subscribeToNotifications(resolvedId, () => {
+      getUnreadCount(resolvedId).then((c) => {
+        if (!cancelled) setCount(c);
+      });
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [resolvedId]);
   return count;
 }
 
-export function usePendingRequestsCount(userId = "me"): number {
+export function usePendingRequestsCount(userId?: string): number {
+  const resolvedId = useResolvedUserId(userId);
   const [count, setCount] = React.useState(0);
-  React.useEffect(() => {
-    let cancelled = false;
-    getReceivedRequests(userId).then((rs) => {
-      if (!cancelled) setCount(rs.filter((r) => r.status === "pending").length);
+
+  const refresh = React.useCallback((id: string) => {
+    getReceivedRequests(id).then((rs) => {
+      setCount(rs.filter((r) => r.status === "pending").length);
     });
-    return () => {
-      cancelled = true;
-    };
-  }, [userId]);
+  }, []);
+
+  React.useEffect(() => {
+    if (!resolvedId) return;
+    refresh(resolvedId);
+    return subscribeToRequests(resolvedId, () => refresh(resolvedId));
+  }, [resolvedId, refresh]);
   return count;
 }

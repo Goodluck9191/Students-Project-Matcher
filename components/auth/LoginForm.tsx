@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useToast } from "@/components/ui/Toast";
 import { mockSignIn, validateEmail, validatePassword } from "@/lib/services/auth";
+import { isSupabaseConfigured } from "@/lib/supabase/config";
 
 export function LoginForm() {
   const router = useRouter();
@@ -51,7 +52,9 @@ export function LoginForm() {
       }
       if (real.ok) {
         success("Signed in", "Welcome back!");
-        router.push(real.role === "admin" ? "/admin" : "/dashboard");
+        const next = new URLSearchParams(window.location.search).get("next");
+        const safeNext = next && next.startsWith("/") && !next.startsWith("//") ? next : null;
+        router.push(safeNext ?? (real.role === "admin" ? "/admin" : "/dashboard"));
         router.refresh();
         return;
       }
@@ -142,10 +145,12 @@ export function LoginForm() {
       <Button type="submit" loading={loading} className="w-full" size="lg">
         Log in
       </Button>
-      <p className="rounded-xl bg-slate-50 px-3.5 py-2.5 text-xs leading-relaxed text-slate-500">
-        Demo hint: sign in with <span className="font-semibold">demo@university.edu</span> /{" "}
-        <span className="font-semibold">password123</span>. Nothing leaves your browser.
-      </p>
+      {!isSupabaseConfigured() && (
+        <p className="rounded-xl bg-slate-50 px-3.5 py-2.5 text-xs leading-relaxed text-slate-500">
+          Demo hint: sign in with <span className="font-semibold">demo@university.edu</span> /{" "}
+          <span className="font-semibold">password123</span>. Nothing leaves your browser.
+        </p>
+      )}
     </form>
   );
 }

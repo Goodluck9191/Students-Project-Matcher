@@ -113,7 +113,12 @@ export async function getTeamMessages(teamId: string): Promise<Message[]> {
  * Caller passes the team id; the channel filter scopes delivery so users
  * never receive other teams' messages. Returns an unsubscribe function.
  * No-op (returns noop) in mock mode.
+ *
+ * NOTE: unique channel per call — supabase-js reuses cached channels by
+ * topic and .on() after subscribe() throws (StrictMode remounts).
  */
+let chatChannelSeq = 0;
+
 export function subscribeToTeamMessages(
   teamId: string,
   onMessage: (message: Message) => void
@@ -121,7 +126,7 @@ export function subscribeToTeamMessages(
   if (!isSupabaseConfigured()) return () => {};
   const supabase = createClient();
   const channel = supabase
-    .channel(`team-chat:${teamId}`)
+    .channel(`team-chat:${teamId}:${++chatChannelSeq}`)
     .on(
       "postgres_changes",
       { event: "INSERT", schema: "public", table: "team_messages", filter: `team_id=eq.${teamId}` },

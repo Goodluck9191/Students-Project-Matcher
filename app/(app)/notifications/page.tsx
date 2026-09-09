@@ -16,6 +16,7 @@ import {
 import {
   getNotifications,
   markAllAsRead,
+  subscribeToNotifications,
 } from "@/lib/services/notifications";
 import { getSessionIdentity } from "@/lib/services/session";
 import type { AppNotification } from "@/types";
@@ -24,7 +25,7 @@ import type { AppNotification } from "@/types";
 export default function NotificationsPage() {
   const { success, error } = useToast();
   const [items, setItems] = React.useState<AppNotification[] | null>(null);
-  const [myId, setMyId] = React.useState("me");
+  const [myId, setMyId] = React.useState<string | null>(null);
   const [failed, setFailed] = React.useState(false);
   const [filter, setFilter] = React.useState<NotificationFilter>("all");
   const [marking, setMarking] = React.useState(false);
@@ -39,6 +40,18 @@ export default function NotificationsPage() {
       .catch(() => setFailed(true));
   }, []);
 
+  // Realtime inserts land instantly (deduped by id).
+  React.useEffect(() => {
+    if (!myId) return;
+    return subscribeToNotifications(myId, (incoming) => {
+      setItems((prev) => {
+        if (!prev) return prev;
+        if (prev.some((n) => n.id === incoming.id)) return prev;
+        return [incoming, ...prev];
+      });
+    });
+  }, [myId]);
+
   React.useEffect(() => {
     load();
   }, [load]);
@@ -47,6 +60,7 @@ export default function NotificationsPage() {
   const visible = (items ?? []).filter((n) => (filter === "unread" ? !n.isRead : true));
 
   async function handleMarkAll() {
+    if (!myId) return;
     setMarking(true);
     try {
       const count = await markAllAsRead(myId);

@@ -9,7 +9,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { useToast } from "@/components/ui/Toast";
 import { ProjectForm } from "@/components/projects/ProjectForm";
 import { ProjectPreview } from "@/components/projects/ProjectPreview";
-import { mockCurrentStudent } from "@/lib/mock/students";
+import { getSessionIdentity } from "@/lib/services/session";
 import {
   EMPTY_FORM,
   createProject,
@@ -19,8 +19,9 @@ import {
 } from "@/lib/services/projects";
 
 /**
- * Create project: validate → mock project object → toast → /projects/[id].
- * Nothing is persisted to a real database (demo mode).
+ * Create project: validate → service (Supabase action or mock store)
+ * → toast → /projects/[id]. Author identity is re-derived server-side
+ * in Supabase mode; the session name is a display hint only.
  */
 export default function CreateProjectPage() {
   const router = useRouter();
@@ -40,11 +41,12 @@ export default function CreateProjectPage() {
     }
     setSubmitting(true);
     try {
+      const identity = await getSessionIdentity();
       const project = await createProject(values, {
-        id: mockCurrentStudent.id,
-        name: mockCurrentStudent.fullName,
+        id: identity.id,
+        name: identity.fullName,
       });
-      success("Project created", "Saved locally in demo mode.");
+      success("Project created", "Your project is ready to find teammates.");
       router.push(`/projects/${project.id}`);
     } catch {
       error("Couldn't create the project", "Please try again.");

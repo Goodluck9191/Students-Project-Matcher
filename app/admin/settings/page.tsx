@@ -40,7 +40,7 @@ export default function AdminSettingsPage() {
     e.preventDefault();
     setSettings(saveAdminSettings(settings));
     setSaved(true);
-    success("Settings saved", "Stored locally in demo mode.");
+    success("Settings saved", "Your changes are saved.");
   }
 
   return (

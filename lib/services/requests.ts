@@ -1,6 +1,6 @@
 import type { Project, Student, Team, TeamRequest, TeamRequestStatus } from "@/types";
 import { mockRequests } from "@/lib/mock/requests";
-import { addTeamMember, getTeamById, getTeamForProject, isTeamFull } from "./teams";
+import { addTeamMember, ensureTeamForProject, getTeamById, isTeamFull } from "./teams";
 import { getProjectById } from "./projects";
 import { getStudentById } from "./students";
 import { createNotification } from "./notifications";
@@ -164,6 +164,37 @@ export function findPendingRequest(teamId: string, studentId: string): TeamReque
   );
 }
 
+/**
+ * Realtime request stream for one user (INSERT + UPDATE on rows where they
+ * are sender or recipient). Supabase mode only; mock mode is a no-op.
+ * The caller refreshes lists on events; cleanup unsubscribes.
+ *
+ * NOTE: unique channel per call — supabase-js reuses cached channels by
+ * topic and .on() after subscribe() throws (StrictMode remounts).
+ */
+let requestChannelSeq = 0;
+
+export function subscribeToRequests(userId: string, onChange: () => void): () => void {
+  if (!isSupabaseConfigured()) return () => {};
+  const supabase = createClient();
+  const channel = supabase
+    .channel(`requests:${userId}:${++requestChannelSeq}`)
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "team_requests", filter: `sender_id=eq.${userId}` },
+      () => onChange()
+    )
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "team_requests", filter: `recipient_id=eq.${userId}` },
+      () => onChange()
+    )
+    .subscribe();
+  return () => {
+    void supabase.removeChannel(channel);
+  };
+}
+
 /** DB-aware variant for Supabase mode (async; same semantics). */
 export async function getPendingForTeam(
   teamId: string,
@@ -295,7 +326,12 @@ export async function sendJoinRequest(args: {
 }): Promise<Result<TeamRequest>> {
   if (isSupabaseConfigured()) {
     const res = await sendJoinRequestAction(args.projectId, args.message);
-    if (!res.ok) return { ok: false, error: mapActionError(res.code) };
+    if (!res.ok) {
+      // NOT_FOUND here means the project (or its team setup) is gone —
+      // never "request no longer exists".
+      if (res.code === "NOT_FOUND") return { ok: false, error: "PROJECT_NOT_FOUND" };
+      return { ok: false, error: mapActionError(res.code) };
+    }
     const created = await getRequestById(res.data.id);
     if (!created) return { ok: false, error: "REQUEST_NOT_FOUND" };
     return { ok: true, request: created };
@@ -303,8 +339,11 @@ export async function sendJoinRequest(args: {
   await delay();
   const project = await getProjectById(args.projectId);
   if (!project) return { ok: false, error: "PROJECT_NOT_FOUND" };
-  const team = await getTeamForProject(args.projectId);
-  if (!team) return { ok: false, error: "TEAM_NOT_FOUND" };
+  // Workspace on demand: projects predating teams have no row yet.
+  // Created owned by the project creator (never the requester).
+  const ensured = await ensureTeamForProject(project.id, project.creatorId);
+  if (!ensured.ok) return { ok: false, error: "TEAM_NOT_FOUND" };
+  const team = ensured.team;
   if (team.members.some((m) => m.studentId === args.senderId))
     return { ok: false, error: "ALREADY_MEMBER" };
   if (isTeamFull(team)) return { ok: false, error: "TEAM_FULL" };

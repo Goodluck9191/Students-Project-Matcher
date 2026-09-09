@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/Button";
 import { NotificationBell } from "@/components/notifications/NotificationBadge";
 import { useUnreadCount } from "@/components/notifications/useNotificationCounts";
 import { getSessionIdentity } from "@/lib/services/session";
+import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { mockCurrentStudent } from "@/lib/mock/students";
 
 export function Navbar({ onMenuClick }: { onMenuClick: () => void }) {
@@ -17,9 +18,8 @@ export function Navbar({ onMenuClick }: { onMenuClick: () => void }) {
   // Null until the session identity resolves — never render another
   // user's name (in Supabase mode the demo fixture must not flash).
   const [displayName, setDisplayName] = React.useState<string | null>(null);
-  const [displayMeta] = React.useState(
-    `${mockCurrentStudent.program} · Y${mockCurrentStudent.year}`
-  );
+  // Program/year subtitle is mock-mode-only; Supabase mode shows the name,
+  // which always resolves from the session (never another user's data).
   const unread = useUnreadCount();
   const menuRef = React.useRef<HTMLDivElement>(null);
 
@@ -86,9 +86,11 @@ export function Navbar({ onMenuClick }: { onMenuClick: () => void }) {
                 <span className="block max-w-[120px] truncate text-[13px] font-semibold text-slate-900">
                   {displayName}
                 </span>
-                <span className="block text-[11px] text-slate-500">
-                  {displayMeta}
-                </span>
+                {!isSupabaseConfigured() && (
+                  <span className="block text-[11px] text-slate-500">
+                    {mockCurrentStudent.program} · Y{mockCurrentStudent.year}
+                  </span>
+                )}
               </>
             )}
           </span>

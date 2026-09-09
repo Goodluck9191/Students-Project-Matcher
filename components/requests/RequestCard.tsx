@@ -57,7 +57,7 @@ function ConfirmModal({
       <p className="text-sm text-slate-600">
         {confirmLabel === "Cancel Invitation"
           ? "The recipient will no longer see this invitation."
-          : "This cannot be undone in demo mode history."}
+          : "The request will stay in history with its new status."}
       </p>
     </Modal>
   );
