@@ -31,6 +31,14 @@ export interface DbProfile {
   role: string | null;
   is_active: boolean | null;
   profile_completed: boolean | null;
+  university: string | null;
+  department: string | null;
+  graduation_year: string | null;
+  previous_experience: string | null;
+  available_days: unknown;
+  day_times: unknown;
+  work_style: string | null;
+  skill_levels: unknown;
   created_at: string;
   updated_at: string;
 }
@@ -140,6 +148,48 @@ export function toDbStatus(app: ProjectStatus): string {
 
 function strArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+}
+
+export interface ProfileExtra {
+  university: string;
+  department: string;
+  graduationYear: string;
+  previousExperience: string;
+  availableDays: string[];
+  dayTimes: string[];
+  workStyle?: string;
+  skillLevels: { skill: string; level: "Beginner" | "Intermediate" | "Advanced" }[];
+}
+
+const SKILL_LEVELS = ["Beginner", "Intermediate", "Advanced"] as const;
+
+function skillLevels(value: unknown): ProfileExtra["skillLevels"] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((v) => {
+    if (
+      typeof v === "object" &&
+      v !== null &&
+      typeof (v as { skill?: unknown }).skill === "string" &&
+      SKILL_LEVELS.includes((v as { level?: string }).level as (typeof SKILL_LEVELS)[number])
+    ) {
+      const entry = v as { skill: string; level: (typeof SKILL_LEVELS)[number] };
+      return [{ skill: entry.skill, level: entry.level }];
+    }
+    return [];
+  });
+}
+
+export function mapProfileExtra(row: DbProfile): ProfileExtra {
+  return {
+    university: row.university ?? "",
+    department: row.department ?? "",
+    graduationYear: row.graduation_year ?? "",
+    previousExperience: row.previous_experience ?? "",
+    availableDays: strArray(row.available_days),
+    dayTimes: strArray(row.day_times),
+    workStyle: row.work_style ?? undefined,
+    skillLevels: skillLevels(row.skill_levels),
+  };
 }
 
 export function mapProfile(row: DbProfile): Student & { role: string; isActive: boolean; email: string } {

@@ -2,7 +2,7 @@ import type { StudentProfile } from "@/types";
 import { emptyProfileDraft, mockProfile } from "@/lib/mock/profile";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/client";
-import { mapProfile, type DbProfile } from "@/lib/supabase/mappers";
+import { mapProfile, mapProfileExtra, type DbProfile } from "@/lib/supabase/mappers";
 import { saveProfileAction } from "@/lib/actions/profile";
 
 /**
@@ -67,40 +67,72 @@ export function seedDraftFromMock(): StudentProfile {
   return { ...mockProfile, updatedAt: new Date().toISOString() };
 }
 
+export type PersistedProfileResult =
+  | { status: "mock" } // Supabase not configured — caller uses local fixtures
+  | { status: "unauthenticated" } // No session — caller prompts login
+  | { status: "missing" } // Signed in, but no profiles row yet — caller prompts setup
+  | { status: "ok"; profile: StudentProfile }
+  | { status: "error"; error: string };
+
 /**
  * Load the persisted profile (Supabase mode) mapped onto the setup draft
- * shape. Returns null when there is nothing saved yet.
+ * shape. Distinguishes missing-row from failure so callers never fall back
+ * to mock data by accident.
  */
-export async function loadPersistedProfile(): Promise<StudentProfile | null> {
-  if (!isSupabaseConfigured()) return null;
+export async function loadPersistedProfile(): Promise<PersistedProfileResult> {
+  if (!isSupabaseConfigured()) return { status: "mock" };
   const supabase = createClient();
   const {
     data: { user },
+    error: userError,
   } = await supabase.auth.getUser();
-  if (!user) return null;
-  const { data, error } = await supabase.from("profiles").select("*").eq("id", user.id).single();
-  if (error || !data) return null;
+  if (userError || !user) return { status: "unauthenticated" };
+  // maybeSingle: missing row is data=null (no error) instead of an exception.
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("*")
+    .eq("id", user.id)
+    .maybeSingle();
+  if (error) return { status: "error", error: "Couldn't load your profile. Please try again." };
+  if (!data) return { status: "missing" };
   const row = mapProfile(data as DbProfile);
+  const extra = mapProfileExtra(data as DbProfile);
   const base = emptyProfileDraft();
   return {
-    ...base,
-    id: row.id,
-    fullName: row.fullName,
-    bio: row.bio,
-    program: row.program,
-    year: row.year,
-    skills: row.skills.map((s) => ({ skill: s, level: "Intermediate" as const })),
-    interests: row.interests,
-    availability: row.availability,
-    experienceLevel: row.experienceLevel,
-    profileCompletion: row.profileCompletion,
-    updatedAt: new Date().toISOString(),
+    status: "ok",
+    profile: {
+      ...base,
+      id: row.id,
+      fullName: row.fullName,
+      email: row.email,
+      avatarUrl: row.avatarUrl,
+      bio: row.bio,
+      university: extra.university,
+      department: extra.department,
+      graduationYear: extra.graduationYear,
+      previousExperience: extra.previousExperience,
+      availableDays: extra.availableDays as StudentProfile["availableDays"],
+      dayTimes: extra.dayTimes as StudentProfile["dayTimes"],
+      workStyle: (extra.workStyle as StudentProfile["workStyle"]) ?? base.workStyle,
+      program: row.program,
+      year: row.year,
+      skills:
+        extra.skillLevels.length > 0
+          ? extra.skillLevels.filter((s) => row.skills.includes(s.skill))
+          : row.skills.map((s) => ({ skill: s, level: "Intermediate" as const })),
+      interests: row.interests,
+      availability: row.availability,
+      experienceLevel: row.experienceLevel,
+      profileCompletion: row.profileCompletion,
+      updatedAt: new Date().toISOString(),
+    },
   };
 }
 
 /**
  * Persist the finished draft. Supabase mode writes through the Server
- * Action (whitelisted fields only); mock mode keeps localStorage behavior.
+ * Action (whitelisted fields only — role/is_active can never be written
+ * here); mock mode keeps localStorage behavior.
  */
 export async function persistProfile(
   draft: StudentProfile
@@ -113,11 +145,47 @@ export async function persistProfile(
     program: draft.program,
     year: draft.year,
     skills: draft.skills.map((s) => s.skill),
+    skillLevels: draft.skills.map((s) => ({ skill: s.skill, level: s.level })),
     interests: draft.interests,
     availability: draft.availability,
+    availableDays: [...draft.availableDays],
+    dayTimes: [...draft.dayTimes],
+    workStyle: draft.workStyle,
     experienceLevel: draft.experienceLevel,
+    department: draft.department ?? "",
+    graduationYear: draft.graduationYear ?? "",
+    previousExperience: draft.previousExperience ?? "",
+    avatarUrl: draft.avatarUrl,
   });
   return res.ok ? { ok: true } : { ok: false, error: res.error };
+}
+
+/**
+ * Upload a profile photo to the `avatars` bucket and return its public URL.
+ * Mock mode / unconfigured: returns null (caller keeps the local preview).
+ * Files are capped at 5 MB and must be JPEG/PNG.
+ */
+export async function uploadAvatar(file: File): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
+  if (!isSupabaseConfigured()) return { ok: false, error: "Supabase is not configured." };
+  if (!["image/jpeg", "image/png"].includes(file.type))
+    return { ok: false, error: "Photo must be a JPG or PNG." };
+  if (file.size > 5 * 1024 * 1024)
+    return { ok: false, error: "Photo must be smaller than 5 MB." };
+  const { createClient } = await import("@/lib/supabase/client");
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "You must be signed in." };
+  const ext = file.type === "image/png" ? "png" : "jpg";
+  const path = `${user.id}/${Date.now()}.${ext}`;
+  const { error } = await supabase.storage.from("avatars").upload(path, file, {
+    contentType: file.type,
+    upsert: false,
+  });
+  if (error) return { ok: false, error: "Couldn't upload the photo. Please try again." };
+  const { data } = supabase.storage.from("avatars").getPublicUrl(path);
+  return { ok: true, url: data.publicUrl };
 }
 
 export type ProfileErrors = Partial<Record<string, string>>;

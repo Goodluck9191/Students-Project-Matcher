@@ -5,10 +5,14 @@ import { Camera } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 
 /**
- * Mock avatar upload — preview only.
- * TODO (Supabase Storage): upload to the `avatars` bucket on save and
- * persist the public URL as `avatar_url`. The object URL below never
- * leaves the browser.
+ * Profile photo picker. Shows an instant local preview and hands the raw
+ * File to the caller, which uploads it to the `avatars` Storage bucket on
+ * save (Supabase mode) and persists the public URL. Blob previews never
+ * reach the database — the save action only accepts http(s) URLs.
+ *
+ * The preview prefers a newly picked file, falling back to `previewUrl`
+ * (e.g. the stored avatar_url arriving after mount). Parents remount via
+ * `key` to discard a picked file (cancel flows).
  */
 export function AvatarUpload({
   name,
@@ -20,16 +24,18 @@ export function AvatarUpload({
   onFileSelect: (file: File | undefined, previewUrl: string | undefined) => void;
 }) {
   const inputRef = React.useRef<HTMLInputElement>(null);
-  const [localPreview, setLocalPreview] = React.useState<string | undefined>(previewUrl);
+  const [pickedUrl, setPickedUrl] = React.useState<string | undefined>(undefined);
+  const shown = pickedUrl ?? previewUrl;
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) {
+      setPickedUrl(undefined);
       onFileSelect(undefined, undefined);
       return;
     }
     const url = URL.createObjectURL(file);
-    setLocalPreview(url);
+    setPickedUrl(url);
     onFileSelect(file, url);
   }
 
@@ -37,7 +43,7 @@ export function AvatarUpload({
     <div className="flex items-center gap-4">
       <Avatar
         name={name || "Student"}
-        src={localPreview}
+        src={shown}
         size="xl"
         className="ring-2 ring-slate-200"
       />
@@ -48,10 +54,10 @@ export function AvatarUpload({
           className="inline-flex h-9 items-center gap-2 rounded-xl bg-brand-50 px-3.5 text-sm font-semibold text-brand-700 ring-1 ring-inset ring-brand-200 transition-colors hover:bg-brand-100"
         >
           <Camera className="h-4 w-4" aria-hidden />
-          {localPreview ? "Change photo" : "Upload photo"}
+          {shown ? "Change photo" : "Upload photo"}
         </button>
         <p className="mt-1.5 text-xs text-slate-500">
-          JPG or PNG. Preview only in demo mode.
+          JPG or PNG, up to 5 MB. Saved with your profile.
         </p>
         <input
           ref={inputRef}

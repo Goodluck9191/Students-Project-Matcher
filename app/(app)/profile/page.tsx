@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/Button";
 import { Card, CardContent } from "@/components/ui/Card";
 import { Input, Select, Textarea } from "@/components/ui/Input";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { Skeleton } from "@/components/ui/Skeleton";
+import { EmptyState, ErrorState } from "@/components/ui/States";
 import { useToast } from "@/components/ui/Toast";
 import {
   AvatarUpload,
@@ -17,12 +19,14 @@ import {
   AvailabilitySelector,
   ExperienceSelector,
 } from "@/components/profile";
-import { PROGRAM_OPTIONS } from "@/types";
+import { PROGRAM_OPTIONS, type StudentProfile } from "@/types";
 import { mockProfile } from "@/lib/mock/profile";
+import { isSupabaseConfigured } from "@/lib/supabase/config";
 import {
   computeCompletion,
   loadPersistedProfile,
   persistProfile,
+  uploadAvatar,
   validateComplete,
   type ProfileErrors,
 } from "@/lib/services/profile";
@@ -38,28 +42,57 @@ const YEAR_OPTIONS = ["1", "2", "3", "4", "5"].map((y) => ({
  */
 export default function OwnProfilePage() {
   const { success, error } = useToast();
-  const [profile, setProfile] = React.useState(mockProfile);
-  const [editing, setEditing] = React.useState(false);
-  const [draft, setDraft] = React.useState(mockProfile);
+  // Supabase mode never seeds state from mock data: null = still loading,
+  // and every load outcome below replaces it explicitly.
+  const configured = isSupabaseConfigured();
+  const [profile, setProfile] = React.useState<StudentProfile | null>(
+    configured ? null : mockProfile
+  );
+  const [draft, setDraft] = React.useState<StudentProfile>(mockProfile);
   const [errors, setErrors] = React.useState<ProfileErrors>({});
+  const [loadError, setLoadError] = React.useState<string | null>(null);
+  const [missing, setMissing] = React.useState<"setup" | "login" | null>(null);
+  const [editing, setEditing] = React.useState(false);
+  const [saving, setSaving] = React.useState(false);
+  const [avatarFile, setAvatarFile] = React.useState<File | undefined>(undefined);
 
   React.useEffect(() => {
+    if (!isSupabaseConfigured()) return;
     let cancelled = false;
-    loadPersistedProfile().then((saved) => {
-      if (!cancelled && saved) {
-        setProfile(saved);
-        setDraft(saved);
+    loadPersistedProfile().then((res) => {
+      if (cancelled) return;
+      if (res.status === "ok") {
+        setProfile(res.profile);
+        setDraft(res.profile);
+      } else if (res.status === "missing") {
+        setMissing("setup");
+      } else if (res.status === "unauthenticated") {
+        setMissing("login");
+      } else if (res.status === "error") {
+        setLoadError(res.error);
       }
+      // "mock" is unreachable here (guarded above); fixtures stay as-is.
     });
     return () => {
       cancelled = true;
     };
   }, []);
 
+  // Non-null once past the loading/missing/error guards below
+  // (mock mode always has the fixture).
+  const activeProfile = profile ?? mockProfile;
+
   function startEdit() {
-    setDraft(profile);
+    setDraft(activeProfile);
     setErrors({});
+    setAvatarFile(undefined);
     setEditing(true);
+  }
+
+  function cancelEdit() {
+    setAvatarFile(undefined);
+    setErrors({});
+    setEditing(false);
   }
 
   async function handleSave() {
@@ -74,17 +107,83 @@ export default function OwnProfilePage() {
       profileCompletion: computeCompletion(draft),
       updatedAt: new Date().toISOString(),
     };
-    const saved = await persistProfile(updated);
-    if (!saved.ok) {
-      error("Couldn't save your profile", saved.error);
-      return;
+    setSaving(true);
+    try {
+      let finalDraft = updated;
+      if (avatarFile) {
+        const uploaded = await uploadAvatar(avatarFile);
+        if (!uploaded.ok) {
+          error("Photo upload failed", uploaded.error);
+          return;
+        }
+        finalDraft = { ...updated, avatarUrl: uploaded.url };
+      }
+      const saved = await persistProfile(finalDraft);
+      if (!saved.ok) {
+        error("Couldn't save your profile", saved.error);
+        return;
+      }
+      setProfile(finalDraft);
+      setAvatarFile(undefined);
+      setEditing(false);
+      success("Profile updated", "Your changes are saved.");
+    } finally {
+      setSaving(false);
     }
-    setProfile(updated);
-    setEditing(false);
-    success("Profile updated", "Your changes are saved.");
+  }
+
+  // (mock mode always has the fixture; configured mode returns below
+  // unless `profile` loaded — `activeProfile` above covers both).
+  if (configured && loadError && !profile) {
+    return (
+      <div className="space-y-4">
+        <PageHeader title="My Profile" subtitle="How teammates and matching see you." />
+        <ErrorState
+          title="Couldn't load your profile"
+          description={loadError}
+          onRetry={() => window.location.reload()}
+        />
+      </div>
+    );
+  }
+
+  if (configured && !profile) {
+    if (missing) {
+      return (
+        <div className="space-y-4">
+          <PageHeader title="My Profile" subtitle="How teammates and matching see you." />
+          <EmptyState
+            title={missing === "login" ? "Please log in" : "No profile yet"}
+            description={
+              missing === "login"
+                ? "Log in to view your real Supabase profile."
+                : "Complete profile setup to create your real Supabase profile."
+            }
+            actionLabel={missing === "login" ? "Log in" : "Set up profile"}
+            actionHref={missing === "login" ? "/login" : "/profile/setup"}
+          />
+        </div>
+      );
+    }
+    return (
+      <div className="space-y-4" role="status" aria-label="Loading profile">
+        <PageHeader title="My Profile" subtitle="How teammates and matching see you." />
+        <Card>
+          <CardContent className="flex items-center gap-4 py-6">
+            <Skeleton className="h-16 w-16 shrink-0 rounded-full" />
+            <div className="flex-1 space-y-2">
+              <Skeleton className="h-5 w-48 max-w-full" />
+              <Skeleton className="h-4 w-64 max-w-full" />
+            </div>
+          </CardContent>
+        </Card>
+        <Skeleton className="h-24 w-full" />
+      </div>
+    );
   }
 
   if (!editing) {
+    const active = activeProfile;
     return (
       <div className="space-y-4">
         <PageHeader
@@ -96,14 +195,14 @@ export default function OwnProfilePage() {
             </Button>
           }
         />
-        <ProfileHeader profile={profile} showEdit={false} />
+        <ProfileHeader profile={active} email={active.email} showEdit={false} />
 
         <div className="grid gap-4 lg:grid-cols-2">
           <Card>
             <CardContent>
               <h3 className="text-[15px] font-semibold text-slate-900">Skills & levels</h3>
               <ul className="mt-3 flex flex-wrap gap-2">
-                {profile.skills.map((s) => (
+                {active.skills.map((s) => (
                   <li key={s.skill}>
                     <Badge variant="primary">
                       {s.skill} · {s.level}
@@ -113,7 +212,7 @@ export default function OwnProfilePage() {
               </ul>
               <h3 className="mt-5 text-[15px] font-semibold text-slate-900">Interests</h3>
               <ul className="mt-3 flex flex-wrap gap-2">
-                {profile.interests.map((i) => (
+                {active.interests.map((i) => (
                   <li key={i}>
                     <Badge variant="info">{i}</Badge>
                   </li>
@@ -125,7 +224,7 @@ export default function OwnProfilePage() {
             <CardContent>
               <h3 className="text-[15px] font-semibold text-slate-900">Availability</h3>
               <ul className="mt-3 flex flex-wrap gap-2">
-                {[...profile.availableDays, ...profile.dayTimes, profile.workStyle]
+                {[...active.availableDays, ...active.dayTimes, active.workStyle]
                   .filter(Boolean)
                   .map((a) => (
                     <li key={a as string}>
@@ -137,21 +236,21 @@ export default function OwnProfilePage() {
               <p className="mt-2 text-sm text-slate-600">
                 Level:{" "}
                 <span className="font-semibold text-slate-900">
-                  {profile.experienceLevel}
+                  {active.experienceLevel}
                 </span>
               </p>
-              {profile.previousExperience && (
+              {active.previousExperience && (
                 <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
-                  {profile.previousExperience}
+                  {active.previousExperience}
                 </p>
               )}
-              {(profile.department || profile.graduationYear) && (
+              {(active.department || active.graduationYear) && (
                 <>
                   <h3 className="mt-5 text-[15px] font-semibold text-slate-900">
                     Academic details
                   </h3>
                   <p className="mt-2 text-sm text-slate-600">
-                    {[profile.department, profile.graduationYear && `Class of ${profile.graduationYear}`]
+                    {[active.department, active.graduationYear && `Class of ${active.graduationYear}`]
                       .filter(Boolean)
                       .join(" · ")}
                   </p>
@@ -168,9 +267,9 @@ export default function OwnProfilePage() {
     <div className="mx-auto max-w-3xl">
       <PageHeader
         title="Edit Profile"
-        subtitle="Changes save locally in demo mode."
+        subtitle="Changes save to your account immediately."
         actions={
-          <Button variant="ghost" size="sm" onClick={() => setEditing(false)}>
+          <Button variant="ghost" size="sm" onClick={cancelEdit}>
             <ArrowLeft className="h-4 w-4" /> Cancel
           </Button>
         }
@@ -183,7 +282,10 @@ export default function OwnProfilePage() {
               <AvatarUpload
                 name={draft.fullName}
                 previewUrl={draft.avatarUrl}
-                onFileSelect={(_, url) => setDraft({ ...draft, avatarUrl: url })}
+                onFileSelect={(file, url) => {
+                  setAvatarFile(file);
+                  setDraft({ ...draft, avatarUrl: url });
+                }}
               />
               <Input
                 label="Full name"
@@ -306,10 +408,10 @@ export default function OwnProfilePage() {
           </section>
 
           <div className="flex flex-col-reverse gap-2 border-t border-slate-100 pt-5 sm:flex-row sm:justify-end">
-            <Button variant="outline" onClick={() => setEditing(false)} className="w-full sm:w-auto">
+            <Button variant="outline" onClick={cancelEdit} className="w-full sm:w-auto">
               Cancel
             </Button>
-            <Button onClick={handleSave} className="w-full sm:w-auto">
+            <Button onClick={handleSave} loading={saving} className="w-full sm:w-auto">
               <Check className="h-4 w-4" /> Save changes
             </Button>
           </div>

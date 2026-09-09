@@ -328,6 +328,7 @@ export type DayTime = "Morning" | "Afternoon" | "Evening" | "Night";
 export interface StudentProfile {
   id: string;
   fullName: string;
+  email?: string;
   avatarUrl?: string;
   bio: string;
   university: string;

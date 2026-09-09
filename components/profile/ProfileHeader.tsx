@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { MapPin, Pencil } from "lucide-react";
+import { Mail, MapPin, Pencil } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -8,9 +8,11 @@ import { ProfileCompletion } from "./ProfileCompletion";
 
 export function ProfileHeader({
   profile,
+  email,
   showEdit = false,
 }: {
   profile: StudentProfile;
+  email?: string;
   showEdit?: boolean;
 }) {
   return (
@@ -31,6 +33,12 @@ export function ProfileHeader({
             {profile.program}
             {profile.year ? ` · Year ${profile.year}` : ""}
           </p>
+          {email && (
+            <p className="mt-1 flex items-center gap-1.5 text-sm text-slate-500">
+              <Mail className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              {email}
+            </p>
+          )}
           {profile.university && (
             <p className="mt-1 flex items-center gap-1.5 text-sm text-slate-500">
               <MapPin className="h-3.5 w-3.5 shrink-0" aria-hidden />
@@ -51,7 +59,7 @@ export function ProfileHeader({
       </div>
       <ProfileCompletion value={profile.profileCompletion} className="mt-5 max-w-md" />
       <p className="mt-3 text-xs text-slate-400">
-        Demo profile — Supabase persistence lands later.{" "}
+        Keep your skills and availability current for better matches.{" "}
         <Link href="/profile/setup" className="font-medium text-brand-700 hover:underline">
           Finish setup
         </Link>
