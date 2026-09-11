@@ -18,7 +18,6 @@ import { listStudents } from "./students";
 import { deleteProjectAction, setProjectStatusAction } from "@/lib/actions/projects";
 import {
   adminSaveSettingsAction,
-  adminSetUserRoleAction,
   adminSetUserStatusAction,
 } from "@/lib/actions/admin";
 import { MATCH_WEIGHTS } from "@/lib/matching/weights";
@@ -62,7 +61,6 @@ export interface AdminUser {
 
 interface UserOverrides {
   status: Record<string, AccountStatus>;
-  role: Record<string, UserRole>;
 }
 
 /** Module memory is canonical (works in Node/tests); localStorage mirrors it in browsers. */
@@ -75,14 +73,14 @@ function readOverrides(): UserOverrides {
       const raw = window.localStorage.getItem(USER_OVERRIDE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw) as UserOverrides;
-        memoryOverrides = { status: parsed.status ?? {}, role: parsed.role ?? {} };
+        memoryOverrides = { status: parsed.status ?? {} };
         return memoryOverrides;
       }
     } catch {
       // ignore
     }
   }
-  memoryOverrides = { status: {}, role: {} };
+  memoryOverrides = { status: {} };
   return memoryOverrides;
 }
 
@@ -158,7 +156,7 @@ export async function getAdminUsers(): Promise<AdminUser[]> {
       email: emailFor(s.fullName),
       program: s.program,
       year: s.year,
-      role: (overrides.role[s.id] ?? (demo.admin.has(s.id) ? "admin" : "student")) as UserRole,
+      role: (demo.admin.has(s.id) ? "admin" : "student") as UserRole,
       accountStatus: (overrides.status[s.id] ?? (demo.inactive.has(s.id) ? "inactive" : "active")) as
         | "active"
         | "inactive",
@@ -227,26 +225,6 @@ export async function adminSetUserStatus(
   if (!known) return { ok: false, error: "NOT_FOUND" };
   const o = readOverrides();
   o.status[id] = status;
-  writeOverrides(o);
-  return { ok: true };
-}
-
-export async function adminSetUserRole(
-  id: string,
-  role: UserRole,
-  actorRole: UserRole
-): Promise<{ ok: true } | { ok: false; error: AdminError }> {
-  if (isSupabaseConfigured()) {
-    const res = await adminSetUserRoleAction(id, role);
-    if (res.ok) return { ok: true };
-    return { ok: false, error: res.code === "FORBIDDEN" || res.code === "UNAUTHENTICATED" ? "FORBIDDEN" : "NOT_FOUND" };
-  }
-  const gate = mockGate(actorRole);
-  if (!gate.ok) return gate;
-  const known = allStudents().some((s) => s.id === id);
-  if (!known) return { ok: false, error: "NOT_FOUND" };
-  const o = readOverrides();
-  o.role[id] = role;
   writeOverrides(o);
   return { ok: true };
 }

@@ -61,7 +61,7 @@ interface Ctx {
 }
 const createdIds: string[] = [];
 
-async function makeUser(who: string, role: "student" | "admin"): Promise<Ctx> {
+async function makeUser(who: string): Promise<Ctx> {
   if (!admin) throw new Error("service key required");
   const svc = admin;
   const email = mkEmail(who);
@@ -73,10 +73,6 @@ async function makeUser(who: string, role: "student" | "admin"): Promise<Ctx> {
   });
   if (error || !data.user) throw new Error(`provision ${who}: ${error?.message}`);
   createdIds.push(data.user.id);
-  if (role === "admin") {
-    const { error: roleErr } = await svc.from("profiles").update({ role: "admin" }).eq("id", data.user.id);
-    if (roleErr) throw new Error(`grant admin: ${roleErr.message}`);
-  }
   const client = createClient(URL, ANON);
   const { error: signErr } = await client.auth.signInWithPassword({ email, password: PASSWORD });
   if (signErr) throw new Error(`signin ${who}: ${signErr.message}`);
@@ -110,11 +106,35 @@ if (!SERVICE) {
   process.exit(failed === 0 ? 0 : 1);
 }
 try {
-  const A = await makeUser("owner", "student");
-  const B = await makeUser("member", "student");
-  const C = await makeUser("outsider", "student");
-  const Z = await makeUser("boss", "admin");
-  check("Live — 4 users provisioned + signed in", true);
+  const A = await makeUser("owner");
+  const B = await makeUser("member");
+  const C = await makeUser("outsider");
+  check("Live — 3 users provisioned + signed in", true);
+
+  // --- single admin: exactly one active admin must exist; a second one
+  // must be impossible even with the service key (constraint + trigger).
+  // NOTE: this assumes the pre-existing production admin; the count check
+  // below fails honestly if the database has zero or two+.
+  {
+    const svc = admin!;
+    const { data: admins } = await svc
+      .from("profiles")
+      .select("id")
+      .eq("role", "admin")
+      .eq("is_active", true);
+    const count = ((admins ?? []) as unknown[]).length;
+    check("Single-admin — exactly one active admin exists", count === 1, `found ${count}`);
+    const { error: promoteErr } = await svc
+      .from("profiles")
+      .update({ role: "admin" })
+      .eq("id", A.id);
+    check(
+      "Single-admin — second admin rejected (even via service key)",
+      !!promoteErr &&
+        (/ADMIN_CONSTRAINT|one_active_admin|duplicate|23505/i.test(promoteErr.message)),
+      promoteErr?.message ?? "promotion allowed!"
+    );
+  }
 
   // --- profiles: own read/update; role escalation blocked ---
   {
@@ -211,15 +231,18 @@ try {
     check("RPC — non-recipient accept rejected", !!hijack.error, hijack.error?.message ?? "allowed!");
   }
 
-  // --- admin powers + boundaries as Z ---
+  // --- admin boundaries (no admin credentials available, so verify the
+  // negative: students cannot perform admin-gated operations) ---
   {
-    const all = await Z.client.from("profiles").select("id");
-    check("Admin — platform user list readable", !all.error && ((all.data ?? []) as unknown[]).length >= 4, all.error?.message);
-    const upd = await Z.client.from("team_members").update({ project_role: "QA" }).eq("team_id", teamId).eq("user_id", A.id);
-    check("Admin — member record manageable", !upd.error, upd.error?.message);
-    const peek = await Z.client.from("team_messages").select("id").eq("team_id", teamId);
+    const all = await A.client.from("profiles").select("id");
+    check("Profiles — authenticated list readable (by design)", !all.error, all.error?.message);
+    const settings = await A.client.from("platform_settings").insert({ key: "x", value: {} });
+    check("Admin — student cannot write platform settings", !!settings.error, settings.error?.message ?? "writable!");
+    const upd = await C.client.from("team_members").update({ project_role: "QA" }).eq("team_id", teamId).eq("user_id", A.id);
+    check("Admin — non-owner/non-admin cannot edit roster", !!upd.error, upd.error?.message ?? "writable!");
+    const peek = await C.client.from("team_messages").select("id").eq("team_id", teamId);
     check("Admin — no blanket private-chat read", !!peek.error, peek.error?.message ?? "readable!");
-    const othersNotes = await Z.client.from("notifications").select("id").eq("user_id", A.id);
+    const othersNotes = await C.client.from("notifications").select("id").eq("user_id", A.id);
     check("Admin — no peeking at user notifications", ((othersNotes.data ?? []) as unknown[]).length === 0, othersNotes.error?.message);
   }
 

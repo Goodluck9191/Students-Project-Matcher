@@ -21,6 +21,7 @@ import {
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const [role, setRole] = React.useState<UserRole | null>(null);
   const [mobileOpen, setMobileOpen] = React.useState(false);
+  const [identity, setIdentity] = React.useState<{ name: string; email: string } | null>(null);
 
   // Mount-only session read: storage/session are unavailable during SSR.
   React.useEffect(() => {
@@ -32,7 +33,16 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       if (isSupabaseConfigured()) {
         const { getMyRoleAction } = await import("@/lib/actions/auth");
         const role = await getMyRoleAction();
-        if (!cancelled) setRole(role ?? "student");
+        if (cancelled) return;
+        setRole(role ?? "student");
+        // Show the real admin identity (never a hardcoded fixture).
+        if (role === "admin") {
+          const { loadPersistedProfile } = await import("@/lib/services/profile");
+          const res = await loadPersistedProfile();
+          if (!cancelled && res.status === "ok") {
+            setIdentity({ name: res.profile.fullName, email: res.profile.email ?? "" });
+          }
+        }
         return;
       }
       // Mock mode: demo-only preview switch.
@@ -80,6 +90,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           title="Admin Console"
           subtitle="Monitor and manage the Project Matcher platform."
           onMenuClick={() => setMobileOpen(true)}
+          adminName={identity?.name}
+          adminEmail={identity?.email}
         />
         <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6 lg:px-8">
           {children}

@@ -10,6 +10,9 @@ import { formatDate } from "@/lib/utils";
 import type { AdminUser } from "@/lib/services/admin";
 import type { UserRole } from "@/lib/services/session";
 
+/** Read-only role display. Platform roles can only be changed by the database
+ * security model (migration 016 enforces exactly one active admin) — there
+ * is intentionally no role-changing control here. */
 function RoleBadge({ role }: { role: UserRole }) {
   return <Badge variant={role === "admin" ? "primary" : "outline"}>{role}</Badge>;
 }
@@ -21,11 +24,9 @@ function StatusBadge({ status }: { status: AdminUser["accountStatus"] }) {
 export function AdminUserTable({
   users,
   onToggleStatus,
-  onChangeRole,
 }: {
   users: AdminUser[];
   onToggleStatus: (user: AdminUser) => void;
-  onChangeRole: (user: AdminUser, role: UserRole) => void;
 }) {
   return (
     <>
@@ -62,16 +63,7 @@ export function AdminUserTable({
                   {u.program} · Y{u.year}
                 </td>
                 <td className="px-4 py-3">
-                  <label className="sr-only" htmlFor={`role-${u.id}`}>Role for {u.name}</label>
-                  <select
-                    id={`role-${u.id}`}
-                    value={u.role}
-                    onChange={(e) => onChangeRole(u, e.target.value as UserRole)}
-                    className="h-8 rounded-lg border border-slate-300 bg-white px-1.5 text-[13px] font-medium focus:border-brand-500 focus:outline-none"
-                  >
-                    <option value="student">student</option>
-                    <option value="admin">admin</option>
-                  </select>
+                  <RoleBadge role={u.role} />
                 </td>
                 <td className="px-4 py-3">
                   <StatusBadge status={u.accountStatus} />
@@ -129,18 +121,6 @@ export function AdminUserTable({
                     {u.accountStatus === "active" ? "Deactivate" : "Activate"}
                   </Button>
                 </div>
-                <label className="mt-2.5 flex items-center gap-2 text-[13px] text-slate-600">
-                  Role
-                  <select
-                    value={u.role}
-                    onChange={(e) => onChangeRole(u, e.target.value as UserRole)}
-                    aria-label={`Role for ${u.name}`}
-                    className="h-8 rounded-lg border border-slate-300 bg-white px-1.5 text-[13px] font-medium"
-                  >
-                    <option value="student">student</option>
-                    <option value="admin">admin</option>
-                  </select>
-                </label>
               </CardContent>
             </Card>
           </li>
