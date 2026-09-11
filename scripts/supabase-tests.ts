@@ -10,7 +10,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { isSupabaseConfigured, NOT_CONFIGURED_ERROR } from "../lib/supabase/config";
-import { isPublicPath } from "../lib/supabase/session";
+import { isPublicPath, getRoleRedirect } from "../lib/supabase/session";
 import { transferOwnership, leaveTeam } from "../lib/services/teams";
 import {
   mapNotification,
@@ -153,7 +153,7 @@ const ROOT = process.cwd();
 {
   const dir = join(ROOT, "supabase", "migrations");
   const files = existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith(".sql")) : [];
-  check("Migrations — 15 files present", files.length === 15, `${files.length}`);
+  check("Migrations — 17 files present", files.length === 17, `${files.length}`);
   const all = files.map((f) => readFileSync(join(dir, f), "utf8")).join("\n");
   const tables = ["profiles", "projects", "teams", "team_members", "team_requests", "notifications", "team_messages", "platform_settings"];
   check("Migrations — all tables created", tables.every((t) => all.includes(`create table if not exists public.${t}`)));
@@ -182,6 +182,15 @@ const ROOT = process.cwd();
   check("Migrations — one team per project", all.includes("teams_project_unique"));
   check("Migrations — ensure team RPC", all.includes("create or replace function public.ensure_project_team"));
   check(
+    "Migrations — ensure RPC returns owner (no RLS-gated re-read needed)",
+    all.includes("returns table (team_id uuid, owner_id uuid)")
+  );
+  check("Migrations — single active admin index", all.includes("one_active_admin"));
+  check(
+    "Migrations — last-admin-loss guard trigger",
+    all.includes("prevent_last_admin_loss") && all.includes("ADMIN_CONSTRAINT")
+  );
+  check(
     "Proxy — public vs protected paths",
     isPublicPath("/") &&
       isPublicPath("/login") &&
@@ -189,6 +198,27 @@ const ROOT = process.cwd();
       !isPublicPath("/dashboard") &&
       !isPublicPath("/admin/users") &&
       !isPublicPath("/teams/team-asset/chat")
+  );
+  check(
+    "Roles — admin bounced from student area",
+    getRoleRedirect("/dashboard", "admin") === "/admin" &&
+      getRoleRedirect("/projects/abc", "admin") === "/admin" &&
+      getRoleRedirect("/teams/team-asset/chat", "admin") === "/admin" &&
+      getRoleRedirect("/profile", "admin") === "/admin" &&
+      getRoleRedirect("/profile/me", "admin") === "/admin" &&
+      getRoleRedirect("/profile/setup", "admin") === "/admin"
+  );
+  check(
+    "Roles — admin keeps profile inspector + admin console",
+    getRoleRedirect("/profile/some-uuid", "admin") === null &&
+      getRoleRedirect("/admin/users", "admin") === null &&
+      getRoleRedirect("/", "admin") === null
+  );
+  check(
+    "Roles — students unaffected",
+    getRoleRedirect("/dashboard", "student") === null &&
+      getRoleRedirect("/admin", "student") === null &&
+      getRoleRedirect("/dashboard", null) === null
   );
 
   // Ownership transfer (mock store): owner → member → old owner can leave.
@@ -213,6 +243,13 @@ const ROOT = process.cwd();
 
   const serviceSrc = readFileSync(join(ROOT, "lib", "services", "profile.ts"), "utf8");
   check("Service — loads by session user id", serviceSrc.includes("supabase.auth.getUser()") && serviceSrc.includes(".eq(\"id\", user.id)"));
+
+  // Join flow must not re-read the teams row with requester credentials
+  // (teams_member_read would filter it and falsely report "project missing").
+  const joinActionSrc = readFileSync(join(ROOT, "lib", "actions", "requests.ts"), "utf8");
+  const joinFn = joinActionSrc.slice(joinActionSrc.indexOf("sendJoinRequestAction"));
+  check("Join — uses RPC-provided owner id", joinFn.includes("ensuredRow"));
+  check("Join — no RLS-gated team re-read", !joinFn.includes('.from("teams")'));
 
   // Realtime regression: supabase-js reuses cached channels by topic, and
   // .on() after subscribe() throws on remount — every subscribe helper

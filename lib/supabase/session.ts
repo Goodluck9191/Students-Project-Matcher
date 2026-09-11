@@ -27,6 +27,46 @@ export function isPublicPath(pathname: string): boolean {
   return PUBLIC_PREFIXES.some((p) => p !== "/" && pathname.startsWith(p));
 }
 
+/**
+ * Student-area routes: the personal workspace (dashboard, projects, teams,
+ * matching, requests, notifications, own profile pages). Admins are
+ * redirected to /admin from these — platform admins operate only in the
+ * admin console, never as students.
+ *
+ * NOTE: /profile/[id] (any sub-path under /profile/ except /profile itself,
+ * /profile/me and /profile/setup) is intentionally NOT listed: admins use
+ * it read-only to inspect student accounts from the users table.
+ */
+const ADMIN_BLOCKED_EXACT = ["/profile", "/profile/me", "/profile/setup"];
+
+const ADMIN_BLOCKED_PREFIXES = [
+  "/dashboard",
+  "/matches",
+  "/notifications",
+  "/projects",
+  "/requests",
+  "/teams",
+];
+
+export function isStudentAreaPath(pathname: string): boolean {
+  if (ADMIN_BLOCKED_EXACT.includes(pathname)) return true;
+  return ADMIN_BLOCKED_PREFIXES.some((p) => pathname.startsWith(p));
+}
+
+/**
+ * Pure role-routing decision, shared by proxy.ts and the app-shell gate.
+ * Returns the redirect target, or null when the role may stay.
+ * Students hitting /admin keep the existing Access Denied page (handled
+ * by the admin layout), so this only ever redirects admins.
+ */
+export function getRoleRedirect(
+  pathname: string,
+  role: "admin" | "student" | null
+): "/admin" | null {
+  if (role === "admin" && isStudentAreaPath(pathname)) return "/admin";
+  return null;
+}
+
 export async function updateSession(request: NextRequest) {
   if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
     return NextResponse.next({ request });
@@ -63,6 +103,19 @@ export async function updateSession(request: NextRequest) {
     const login = new URL("/login", request.url);
     login.searchParams.set("next", pathname);
     return NextResponse.redirect(login);
+  }
+
+  // Role separation (Supabase mode only — mock mode has no server-visible
+  // role). Admins are sent to the admin console from student routes.
+  if (user && isStudentAreaPath(pathname)) {
+    const { data } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .single();
+    if ((data as { role: string | null } | null)?.role === "admin") {
+      return NextResponse.redirect(new URL("/admin", request.url));
+    }
   }
 
   return supabaseResponse;

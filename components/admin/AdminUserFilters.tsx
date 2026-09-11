@@ -35,14 +35,7 @@ export function AdminUserFilters({
         placeholder="Search users by name, email, or program…"
         ariaLabel="Search users"
       />
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <FilterSelect
-          label="Role"
-          value={filters.role}
-          onChange={(role) => onChange({ ...filters, role })}
-          options={["student", "admin"]}
-          placeholder="All roles"
-        />
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <FilterSelect
           label="Account status"
           value={filters.accountStatus}

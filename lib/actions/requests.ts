@@ -101,23 +101,23 @@ export async function sendJoinRequestAction(
 
   const supabase = await createClient();
   // Ensure the workspace exists (projects predating teams have none).
-  // The RPC creates it owned by the project creator — never the caller.
-  const { data: teamId, error: ensureError } = await supabase.rpc(
+  // The RPC creates it owned by the project creator — never the caller —
+  // and returns the owner id, so no RLS-gated team re-read is needed here
+  // (the requester is not a member yet, so teams_member_read would filter
+  // the row and falsely report the project as missing).
+  const { data: ensured, error: ensureError } = await supabase.rpc(
     "ensure_project_team",
     { p_project_id: projectId }
   );
-  if (ensureError || !teamId) {
+  const ensuredRow = (
+    Array.isArray(ensured) ? ensured[0] : ensured
+  ) as { team_id: string; owner_id: string } | null;
+  if (ensureError || !ensuredRow) {
     if (ensureError?.message.includes("PROJECT_NOT_FOUND"))
       return fail("NOT_FOUND", "This project no longer exists.");
     return fail("DB_ERROR", "Couldn't set up the team workspace.");
   }
-  const { data: team } = await supabase
-    .from("teams")
-    .select("id, owner_id")
-    .eq("id", teamId as string)
-    .single();
-  const t = team as { id: string; owner_id: string } | null;
-  if (!t) return fail("NOT_FOUND", "This project no longer exists.");
+  const t = { id: ensuredRow.team_id, owner_id: ensuredRow.owner_id };
   const { data, error } = await supabase
     .from("team_requests")
     .insert({

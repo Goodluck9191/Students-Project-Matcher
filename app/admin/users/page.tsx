@@ -15,13 +15,12 @@ import {
 import { AdminLoadingState } from "@/components/admin/AdminStates";
 import { AdminEmptyState } from "@/components/admin/AdminPanels";
 import {
-  adminSetUserRole,
   adminSetUserStatus,
   filterAdminUsers,
   getAdminUsers,
   type AdminUser,
 } from "@/lib/services/admin";
-import { getCurrentRole, type UserRole } from "@/lib/services/session";
+import { getCurrentRole } from "@/lib/services/session";
 import { Card, CardContent } from "@/components/ui/Card";
 
 export default function AdminUsersPage() {
@@ -66,22 +65,11 @@ export default function AdminUsersPage() {
     load();
   }
 
-  async function handleRoleChange(user: AdminUser, role: UserRole) {
-    if (user.role === role) return;
-    const res = await adminSetUserRole(user.id, role, getCurrentRole());
-    if (!res.ok) {
-      error("Action failed", res.error === "FORBIDDEN" ? "Admin role required." : "User not found.");
-      return;
-    }
-    success("Role updated", `${user.name} is now ${role}.`);
-    load();
-  }
-
   return (
     <div className="space-y-5">
       <PageHeader
         title="Users"
-        subtitle={`${users?.length ?? "…"} registered students · roles and account access.`}
+        subtitle={`${users?.length ?? "…"} registered students · account access.`}
       />
 
       <Card>
@@ -104,7 +92,6 @@ export default function AdminUsersPage() {
           <AdminUserTable
             users={visible}
             onToggleStatus={setConfirm}
-            onChangeRole={handleRoleChange}
           />
         </>
       )}
